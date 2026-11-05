@@ -40,7 +40,7 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
 
 
 def write_exports(store: Store, investors: dict[str, Investor], out: Path, days: int = 90,
-                  site_url: str = "", consensus=None, clusters=None) -> list[str]:
+                  site_url: str = "", consensus=None, clusters=None, tickers=None) -> list[str]:
     out = Path(out)
     data = out / "data"
     data.mkdir(parents=True, exist_ok=True)
@@ -77,22 +77,36 @@ def write_exports(store: Store, investors: dict[str, Investor], out: Path, days:
     _write_csv(data / "trades.csv", trades)
     _write_csv(data / "signals.csv", [{k: v for k, v in s.items() if k != "text"} for s in signals])
     (out / "feed.xml").write_text(rss_feed(store, investors, site_url), encoding="utf-8")
+    feeds = out / "feeds"
+    (feeds / "investor").mkdir(parents=True, exist_ok=True)
+    (feeds / "ticker").mkdir(parents=True, exist_ok=True)
+    for key, inv in investors.items():
+        (feeds / "investor" / f"{key}.xml").write_text(
+            rss_feed(store, investors, site_url, 60, investor=key, title=f"Smartmoney Radar · {inv.name}"),
+            encoding="utf-8")
+    for t in tickers or []:
+        safe = "".join(c if c.isalnum() or c in ".-" else "_" for c in t.upper())
+        (feeds / "ticker" / f"{safe}.xml").write_text(
+            rss_feed(store, investors, site_url, 60, ticker=t, title=f"Smartmoney Radar · {t}"), encoding="utf-8")
     return sorted(files) + ["trades.csv", "signals.csv", "index.json", "../feed.xml"]
 
 
-def rss_feed(store: Store, investors: dict[str, Investor], site_url: str = "", days: int = 14) -> str:
-    """RSS 2.0 of new filed trades and investors' own calls."""
+def rss_feed(store: Store, investors: dict[str, Investor], site_url: str = "", days: int = 14,
+             investor: str | None = None, ticker: str | None = None, title: str = "Smartmoney Radar") -> str:
+    """RSS 2.0 of new filed trades and investors' own calls (optionally for one investor or ticker)."""
     end = date.today()
     start = end - timedelta(days=days - 1)
     names = {k: v.name for k, v in investors.items()}
     items = []
-    for t in store.trades_between(start, end, by="filed"):
+    for t in store.trades_between(start, end, investor, ticker, by="filed"):
         side = {"buy": "買進", "sell": "賣出", "stake": "持股逾5%", "report": "提交申報"}.get(t.side, t.side)
         title = f"{names.get(t.investor_key, t.investor_key)} {side} {t.ticker or t.issuer[:40]}"
         items.append((t.filed, title, t.amount_text or t.issuer, t.url or site_url, f"trade:{t.uid}"))
     seen = set()
     for s in store.signals_between(start, end):
         if not s.is_own_view or s.ticker.startswith("SECTOR:") or s.post.uid in seen:
+            continue
+        if (investor and s.post.investor_key != investor) or (ticker and s.ticker != ticker):
             continue
         seen.add(s.post.uid)
         title = f"{names.get(s.post.investor_key, s.post.investor_key)}：{s.post.text[:80]}"
@@ -105,6 +119,6 @@ def rss_feed(store: Store, investors: dict[str, Investor], site_url: str = "", d
         f"<pubDate>{format_datetime(datetime(day.year, day.month, day.day, tzinfo=timezone.utc))}</pubDate></item>"
         for day, t, d, link, g in items[:200])
     return ('<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel>'
-            "<title>Smartmoney Radar</title>"
+            f"<title>{escape(title)}</title>"
             f"<link>{escape(site_url or 'https://github.com/karsun-debug/smartmoney-radar')}</link>"
             "<description>大神的實際交易與本人喊單</description>" + body + "</channel></rss>")

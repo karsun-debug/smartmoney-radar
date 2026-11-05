@@ -637,7 +637,83 @@ def render_clone(results, names: dict[str, str], has_prices: bool) -> str:
     return _page("跟單回測 · Smartmoney Radar", f"<h1>跟單回測</h1>{note}{board}{details}", "", "clone.html")
 
 
-def render_insiders(store: Store, window_days: int = 14, min_insiders: int = 3) -> str:
+def movers_html(prices, tickers) -> str:
+    from .analytics import movers
+    if prices is None or not tickers:
+        return ""
+    ms = movers(prices, sorted(tickers))
+    if len(ms) < 2:
+        return ""
+    top, bottom = ms[:5], [m for m in ms[::-1][:5] if m not in ms[:5]]
+
+    def rows(lst):
+        return "".join(f'<tr><td>{_tick(m.ticker, "")}</td><td class="num">${m.close:,.2f}</td>'
+                       f'<td class="num">{_badge("bullish" if m.change_pct >= 0 else "bearish", f"{m.change_pct:+.2f}%")}</td>'
+                       f'<td class="sub">{m.day}</td></tr>' for m in lst)
+    head = '<tr><th>標的</th><th class="num">收盤</th><th class="num">漲跌</th><th>日期</th></tr>'
+    return (f'<h2>大神關注股：最新漲跌</h2><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">'
+            f'<div><h3>漲最多</h3><div class="tablewrap"><table>{head}{rows(top)}</table></div></div>'
+            f'<div><h3>跌最多</h3><div class="tablewrap"><table>{head}{rows(bottom)}</table></div></div></div>')
+
+
+def discount_html(store, investors, names, prices) -> str:
+    from .analytics import below_guru_price
+    if store is None or prices is None:
+        return ""
+    ds = below_guru_price(store, investors, prices)[:25]
+    if not ds:
+        return ""
+    trs = "".join(
+        f'<tr><td>{_tick(d.ticker, "")}</td><td><a href="investor/{esc(d.investor)}.html">{esc(names.get(d.investor, d.investor))}</a>'
+        f'<div class="sub">占組合 {d.weight * 100:.1f}%</div></td><td class="num">${d.ref_price:,.2f}<div class="sub">{esc(d.quarter)}</div></td>'
+        f'<td class="num">${d.price:,.2f}</td><td class="num">{_badge("bearish", f"{d.discount_pct:.1f}%")}</td></tr>'
+        for d in ds)
+    return ('<h2>比大神 13F 價位還便宜</h2><p class="sub">現價低於大神最新 13F 季末的每股市值（13F 市值 ÷ 股數）。'
+            '這是季末價格，不是大神的實際成本。</p><div class="tablewrap"><table><tr><th>標的</th><th>大神</th>'
+            '<th class="num">13F 季末價</th><th class="num">現價</th><th class="num">差距</th></tr>' + trs + '</table></div>')
+
+
+def insider_extras(store, prices) -> str:
+    from .analytics import cluster_performance, officer_buys
+    from .insiders import find_clusters
+    end = date.today()
+    parts = []
+    big = officer_buys(store.insider_buys_between(end - timedelta(days=29), end))[:20]
+    if big:
+        trs = "".join(
+            f'<tr><td>{b.traded}</td><td>{_tick(b.ticker, "")}<div class="sub">{esc(b.issuer[:30])}</div></td>'
+            f'<td>{esc(b.owner)}<div class="sub">{esc(b.title)}</div></td><td class="num">${b.value / 1e6:,.2f}M</td>'
+            f'<td><a href="{esc(b.url)}" rel="noopener" target="_blank">Form 4</a></td></tr>' for b in big)
+        parts.append('<h2>CEO / CFO 大額買進（30 天、100 萬美元以上）</h2><div class="tablewrap"><table><tr>'
+                     '<th>交易日</th><th>公司</th><th>內部人</th><th class="num">金額</th><th>原始申報</th></tr>'
+                     + trs + '</table></div>')
+    if prices is not None:
+        # Clusters from the past year, each judged from its last buy.
+        hist = []
+        for k in range(0, 365, 14):
+            hist += find_clusters(store.insider_buys_between(end - timedelta(days=k + 13), end - timedelta(days=k)))
+        seen, uniq = set(), []
+        for c in hist:
+            if c.uid not in seen:
+                seen.add(c.uid)
+                uniq.append(c)
+        perf = [r for r in cluster_performance(uniq, prices) if r.ret.get(30) is not None]
+        if perf:
+            trs = "".join(
+                f'<tr><td>{_tick(r.ticker, "")}</td><td class="num">{r.insiders}</td><td>{r.last_buy}</td>'
+                f'<td class="num">{_pct(r.ret.get(30))}<div class="sub">SPY {_pct(r.spy.get(30))}</div></td>'
+                f'<td class="num">{_pct(r.ret.get(90))}<div class="sub">SPY {_pct(r.spy.get(90))}</div></td></tr>'
+                for r in perf[:30])
+            wins = [r for r in perf if r.ret.get(30) is not None and r.spy.get(30) is not None]
+            beat = sum(r.ret[30] > r.spy[30] for r in wins)
+            parts.append(f'<h2>群買之後的股價表現</h2><p class="sub">過去一年的群買，從最後一筆買進日起算；'
+                         f'30 天後贏過 SPY 的比例：{beat}/{len(wins)}。</p><div class="tablewrap"><table><tr><th>標的</th>'
+                         f'<th class="num">人數</th><th>最後買進</th><th class="num">30 天</th><th class="num">90 天</th></tr>'
+                         + trs + '</table></div>')
+    return "".join(parts)
+
+
+def render_insiders(store: Store, window_days: int = 14, min_insiders: int = 3, prices=None) -> str:
     from .insiders import find_clusters
     end = date.today()
     start = end - timedelta(days=window_days - 1)
@@ -646,7 +722,8 @@ def render_insiders(store: Store, window_days: int = 14, min_insiders: int = 3) 
             f'10% 大股東）在公開市場用自己的錢買進，且合計金額超過 10 萬美元。資料來自 SEC 每日 Form 4。</p>')
     if not clusters:
         empty = ('<p class="empty">目前沒有符合的群買。執行 <code>spiderhead insiders</code> 掃描 SEC 每日申報。</p>')
-        return _page("內部人群買 · Smartmoney Radar", f"<h1>內部人群買</h1>{note}{empty}", "", "insiders.html")
+        return _page("內部人群買 · Smartmoney Radar",
+                     f"<h1>內部人群買</h1>{note}{empty}{insider_extras(store, prices)}", "", "insiders.html")
     blocks = []
     for c in clusters:
         rows = "".join(
@@ -659,7 +736,8 @@ def render_insiders(store: Store, window_days: int = 14, min_insiders: int = 3) 
                       f'合計 ${c.value / 1e6:,.2f}M</span></h2><div class="tablewrap"><table><tr><th>交易日</th>'
                       f'<th>內部人</th><th>職位</th><th class="num">股數</th><th class="num">價格</th>'
                       f'<th class="num">金額</th><th>原始申報</th></tr>{rows}</table></div>')
-    return _page("內部人群買 · Smartmoney Radar", f"<h1>內部人群買</h1>{note}{''.join(blocks)}", "", "insiders.html")
+    return _page("內部人群買 · Smartmoney Radar",
+                 f"<h1>內部人群買</h1>{note}{''.join(blocks)}{insider_extras(store, prices)}", "", "insiders.html")
 
 
 def render_retail(store: Store, names: dict[str, str], days: int = 7) -> str:
@@ -1031,7 +1109,7 @@ def render_weekly(store: Store) -> str:
     return _page("週報 · Smartmoney Radar", body, "", "weekly.html")
 
 
-def render_consensus(c, names: dict[str, str]) -> str:
+def render_consensus(c, names: dict[str, str], store=None, investors=None, prices=None) -> str:
     if not c.quarters:
         body = ('<h1>大神共同持股</h1><p class="empty">還沒有 13F 歷史資料。執行 '
                 '<code>spiderhead dashboard --with-13f</code> 下載最近 4 季後就會出現。</p>')
@@ -1065,7 +1143,8 @@ def render_consensus(c, names: dict[str, str]) -> str:
     body = (f'<h1>大神共同持股</h1><p class="sub">依各人最新一季 13F（{esc(qs)}）。選擇權部位不計入。'
             f'13F 有最多 135 天落後，請搭配「即時對帳單」看最新動作。</p>'
             f'<h2>最多大神持有</h2>{owned}<h2>本季最多大神買進（新建倉或加碼）</h2>{bought}'
-            f'<h2>本季最多大神賣出（減碼或清倉）</h2>{sold}')
+            f'<h2>本季最多大神賣出（減碼或清倉）</h2>{sold}'
+            f'{discount_html(store, investors, names, prices)}')
     return _page("大神共同持股 · Smartmoney Radar", body, "", "consensus.html")
 
 
@@ -1092,7 +1171,8 @@ def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
     bears = sum(1 for s in rows if s.stance.value == "bearish")
     body = (f'<p class="sub"><a href="../index.html">← 總覽</a></p><header class="top"><h1>{esc(ticker)} '
             f'<button class="star" data-ticker="{esc(ticker)}" aria-pressed="false">☆ 加入追蹤</button></h1>'
-            f'<span class="sub">{days} 天內被提到 {len(rows)} 次 · ▲ {bulls} / ▼ {bears}</span></header>'
+            f'<span class="sub">{days} 天內被提到 {len(rows)} 次 · ▲ {bulls} / ▼ {bears} · '
+            f'<a href="../feeds/ticker/{esc(_slug(ticker))}.xml">RSS 訂閱</a></span></header>'
             f'{chart}<h2>誰在談</h2>{talk}<h2>大神的實際交易（對帳單）</h2>'
             f'{trades_table(trades, names, "../")}'
             f'{_ticker_13f(consensus, ticker, names)}'
@@ -1103,7 +1183,8 @@ def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
 
 
 def render_index(store: Store, investors: dict[str, Investor], days: int, step: int,
-                 recent_days: int = 7, calls: list[CallResult] | None = None, report_cards=None) -> str:
+                 recent_days: int = 7, calls: list[CallResult] | None = None, report_cards=None,
+                 prices: PriceBook | None = None, tickers=None) -> str:
     start, end = window(days)
     buckets, series = sector_series(store.signals_between(start, end), start, end, step)
     labels = _labels(buckets, step, end)
@@ -1174,6 +1255,7 @@ def render_index(store: Store, investors: dict[str, Investor], days: int, step: 
             f'<h2>多位大神同時在談（近 {recent_days} 天）</h2>{cons}'
             f'<h2>最新對帳單（近 30 天申報的實際交易）</h2>'
             f'{trades_table(store.trades_between(end - timedelta(days=29), end, by="filed"), names, "", limit=20)}'
+            f'{movers_html(prices, tickers)}'
             f'<h2>大神評分卡</h2>{reportcard_table(report_cards or {}, names)}'
             f'<h2>喊單勝率排行</h2>{scoreboard_table(calls or [], names)}'
             f'<h2>大神</h2><div class="grid">{"".join(inv_cards)}</div>'
@@ -1190,7 +1272,7 @@ def render_investor(store: Store, inv: Investor, names: dict[str, str], days: in
     buckets, activity = prof.activity
     own = sum(1 for p, _ in prof.posts if p.kind == "own")
 
-    links = []
+    links = [f'<a href="../feeds/investor/{esc(inv.key)}.xml">RSS 訂閱</a>']
     if inv.handles.get("x"):
         links.append(f'<a href="https://x.com/{esc(inv.handles["x"])}" rel="noopener" target="_blank">X @{esc(inv.handles["x"])}</a>')
     if inv.cik:
@@ -1279,61 +1361,65 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
                days: int = 90, step: int | None = None,
                holdings: dict[str, tuple[str, list[PositionChange], list[ConsistencyItem]]] | None = None,
                prices: PriceBook | None = None) -> Path:
+    from .clone import backtest_all
+    from .consensus13f import build_consensus
+    from .digest import display_names
+    from .export import write_exports
+    from .insiders import find_clusters
+    from .pwa import write_pwa
+    from .reportcard import build_cards
+
     out = Path(out_dir)
-    (out / "assets").mkdir(parents=True, exist_ok=True)
-    (out / "investor").mkdir(exist_ok=True)
+    for sub in ("assets", "investor", "ticker"):
+        (out / sub).mkdir(parents=True, exist_ok=True)
     step = step or (1 if days <= 31 else 7)
     (out / "assets" / "style.css").write_text(CSS, encoding="utf-8")
-    # app.js written at the end, once the search index (all pages) is known.
-    (out / "ticker").mkdir(exist_ok=True)
-    from .digest import display_names
     names = display_names(investors)
     start, end = window(days)
-    # Score calls over a longer look-back so 90-day outcomes exist.
+
+    # Everything the pages share, computed once.
     calls = score_calls(store.signals_between(start - timedelta(days=270), end), prices) if prices else []
-    from .clone import backtest_all
-    from .reportcard import build_cards
     clones = backtest_all(store, investors, prices) if prices is not None else []
     cards = build_cards(store, investors, calls, clones)
-    (out / "index.html").write_text(render_index(store, investors, days, step, calls=calls, report_cards=cards),
-                                    encoding="utf-8")
-    from .consensus13f import build_consensus
     consensus = build_consensus(store, investors)
-    (out / "consensus.html").write_text(render_consensus(consensus, names), encoding="utf-8")
-    (out / "insiders.html").write_text(render_insiders(store), encoding="utf-8")
-    (out / "retail.html").write_text(render_retail(store, names), encoding="utf-8")
-    (out / "weekly.html").write_text(render_weekly(store), encoding="utf-8")
-    (out / "buzz.html").write_text(render_buzz(store, investors, names), encoding="utf-8")
-    (out / "macro.html").write_text(render_macro(store, names), encoding="utf-8")
-    (out / "banks.html").write_text(render_banks(store, names, prices), encoding="utf-8")
-    (out / "earnings.html").write_text(render_earnings(store), encoding="utf-8")
-    (out / "more.html").write_text(render_more(), encoding="utf-8")
-    (out / "my.html").write_text(render_my(), encoding="utf-8")
-    from .pwa import write_pwa
-    write_pwa(out, ["index.html", "more.html", "my.html", "macro.html", "earnings.html", "banks.html", "consensus.html",
-                    "weekly.html"])
-    (out / "activist.html").write_text(render_activist(store, names), encoding="utf-8")
-    (out / "clone.html").write_text(render_clone(clones, names, prices is not None), encoding="utf-8")
-    clone_by = {r.investor: r for r in clones}
-    for inv in investors.values():
-        page = render_investor(store, inv, names, days, step, (holdings or {}).get(inv.key), calls,
-                               clone_by.get(inv.key), cards.get(inv.key))
-        (out / "investor" / f"{inv.key}.html").write_text(page, encoding="utf-8")
+    clusters = find_clusters(store.insider_buys_between(end - timedelta(days=13), end))
     tickers = {s.ticker for s in store.signals_between(start, end)
                if not s.ticker.startswith(("SECTOR:", "MACRO:"))}
     tickers |= {t.ticker for t in store.trades_between(start - timedelta(days=90), end) if t.ticker}
     tickers |= {r.key for r in consensus.most_owned(25) + consensus.most_bought() + consensus.most_sold()
                 if r.key.isupper() and len(r.key) <= 6}
-    from .insiders import find_clusters
-    tickers |= {c.ticker for c in find_clusters(store.insider_buys_between(end - timedelta(days=13), end))}
+    tickers |= {c.ticker for c in clusters}
     tickers |= {c.ticker for c in store.bank_calls(end - timedelta(days=90), end)}
     tickers |= set(store.financial_tickers())
+
+    def write(name: str, html: str) -> None:
+        (out / name).write_text(html, encoding="utf-8")
+
+    write("index.html", render_index(store, investors, days, step, calls=calls, report_cards=cards,
+                                     prices=prices, tickers=tickers))
+    write("consensus.html", render_consensus(consensus, names, store, investors, prices))
+    write("insiders.html", render_insiders(store, prices=prices))
+    write("retail.html", render_retail(store, names))
+    write("weekly.html", render_weekly(store))
+    write("buzz.html", render_buzz(store, investors, names))
+    write("macro.html", render_macro(store, names))
+    write("banks.html", render_banks(store, names, prices))
+    write("earnings.html", render_earnings(store))
+    write("more.html", render_more())
+    write("my.html", render_my())
+    write("activist.html", render_activist(store, names))
+    write("clone.html", render_clone(clones, names, prices is not None))
+    write_pwa(out, ["index.html", "more.html", "my.html", "macro.html", "earnings.html", "banks.html",
+                    "consensus.html", "weekly.html"])
+    clone_by = {r.investor: r for r in clones}
+    for inv in investors.values():
+        page = render_investor(store, inv, names, days, step, (holdings or {}).get(inv.key), calls,
+                               clone_by.get(inv.key), cards.get(inv.key))
+        (out / "investor" / f"{inv.key}.html").write_text(page, encoding="utf-8")
     for t in sorted(tickers):
         (out / "ticker" / f"{_slug(t)}.html").write_text(
             render_ticker(store, t, names, days, prices, consensus), encoding="utf-8")
-    from .export import write_exports
-    write_exports(store, investors, out, days, consensus=consensus,
-                  clusters=find_clusters(store.insider_buys_between(end - timedelta(days=13), end)))
+    write_exports(store, investors, out, days, consensus=consensus, clusters=clusters, tickers=sorted(tickers))
     index = [[f"{t}", f"ticker/{_slug(t)}.html"] for t in sorted(tickers)]
     index += [[f"{inv.name}（{inv.fund}）", f"investor/{inv.key}.html"] for inv in investors.values()]
     (out / "assets" / "app.js").write_text(
