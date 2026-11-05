@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # the 'data' branch holds the database snapshot
   pages: write
   id-token: write
 
@@ -51,15 +51,13 @@ jobs:
           key: spiderhead-db-${{ github.run_id }}
           restore-keys: spiderhead-db-
 
+      - name: Restore database from data branch (preferred over cache)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/data_branch.sh restore
+
       - name: Collect posts and news
         run: spiderhead fetch --days 3 --sources sources.example.json ${{ env.ANTHROPIC_API_KEY != '' && '--llm' || '' }}
-
-      - name: Save database
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: data
-          key: spiderhead-db-${{ github.run_id }}
 
       - name: Build dashboard
         run: spiderhead dashboard --out site --days 90 --with-13f
@@ -74,3 +72,15 @@ jobs:
       - name: Push LINE digest
         if: env.LINE_CHANNEL_ACCESS_TOKEN != ''
         run: spiderhead push-line --days 1 --dashboard-url "${{ steps.deploy.outputs.page_url }}"
+
+      - name: Save database
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: spiderhead-db-${{ github.run_id }}
+      - name: Save database to data branch
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/data_branch.sh save

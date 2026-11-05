@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # the 'data' branch holds the database snapshot
 
 concurrency:
   group: spiderhead-db
@@ -38,6 +38,11 @@ jobs:
           path: data
           key: spiderhead-db-${{ github.run_id }}
           restore-keys: spiderhead-db-
+
+      - name: Restore database from data branch (preferred over cache)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/data_branch.sh restore
       - name: Collect
         run: spiderhead fetch --days 2 --sources sources.example.json ${{ env.ANTHROPIC_API_KEY != '' && '--llm' || '' }}
       - name: Send alerts
@@ -49,3 +54,8 @@ jobs:
         with:
           path: data
           key: spiderhead-db-${{ github.run_id }}
+      - name: Save database to data branch
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/data_branch.sh save

@@ -122,6 +122,9 @@ spiderhead push-line --days 7
    - **instant-alerts**：每 2 小時 —— 有新喊單或新申報交易就立刻推。
    - **tests**：每次推程式碼時跑測試。
 
+   資料庫會存在 repo 的 **`data` 分支**（每次覆寫成單一 commit，只含公開資料），就算 Actions 快取被清掉也不會遺失歷史。
+   想在自己電腦上拿到最新資料：`git fetch origin data && git show FETCH_HEAD:spiderhead.db.gz | gunzip > data/spiderhead.db`
+
 ## 步驟 4（選填）：Claude 分析
 
 到 [Claude Console](https://console.anthropic.com/) 建立 API key，設成 `ANTHROPIC_API_KEY`。
