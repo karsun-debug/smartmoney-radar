@@ -54,6 +54,11 @@ def write_exports(store: Store, investors: dict[str, Investor], out: Path, days:
         "trades.json": trades,
         "signals.json": signals,
     }
+    from .banks import BANK_BY_KEY
+    files["bank_calls.json"] = [
+        {"bank": c.bank, "bank_name": BANK_BY_KEY[c.bank].name if c.bank in BANK_BY_KEY else c.bank,
+         "date": str(c.published), "ticker": c.ticker, "action": c.action, "stance": c.stance,
+         "rating": c.rating, "target": c.target, "url": c.url} for c in store.bank_calls(start, end)]
     if consensus is not None:
         files["consensus13f.json"] = [
             {"ticker": r.key, "issuer": r.issuer, "owners": r.owners, "bought": r.bought, "sold": r.sold,

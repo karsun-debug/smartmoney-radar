@@ -156,3 +156,25 @@ def test_collectors_record_health():
     c.collect(days=3)
     fams = {(r.family, r.ok) for r in c.health.results}
     assert ("news", True) in fams and ("news", False) in fams and ("industry", False) in fams
+
+
+def test_my_tickers_get_priority_alerts():
+    from spiderhead.alerts import INIT_MARK, my_tickers
+    from spiderhead.banks import BankCall
+    assert my_tickers({"SPIDERHEAD_MY_TICKERS": " nvda, tsla ,"}) == {"NVDA", "TSLA"}
+    store = Store(":memory:")
+    store.mark_alerted([(INIT_MARK, "meta")])
+    # A low-confidence news mention would normally be skipped, but NVDA is mine.
+    store.add_posts([Post("wood", TODAY, "Coverage: some talk about $NVDA upside", "news", "https://n/1", "news")])
+    for p in store.unanalyzed():
+        store.save_signals(p, KeywordAnalyzer().analyze(p))
+    store.add_trades([Trade("ackman", TODAY, TODAY, "buy", "4", "GOOGL", "Alphabet", 10, 1.0),
+                      Trade("pelosi", TODAY, TODAY, "buy", "PTR", "NVDA", "NVIDIA", amount_text="$1M")])
+    store.add_bank_calls([BankCall("goldman", TODAY, "NVDA", "downgrade", "bearish", "Sell", 90.0, None, "h", None),
+                          BankCall("citi", TODAY, "AAPL", "upgrade", "bullish", "Buy", None, None, "h", None)])
+    inv, sent = load_watchlist(), []
+    n, text = run_alerts(store, inv, sent.append, mine={"NVDA"})
+    assert "⭐ 🏦 你追蹤的 NVDA：高盛 Goldman Sachs 降評 → Sell，目標價 $90" in text and "AAPL" not in text
+    assert text.index("⭐ 🧾 Nancy Pelosi") < text.index("🧾 Bill Ackman")      # mine first
+    assert "⭐ 💬 Cathie Wood" in text
+    assert run_alerts(store, inv, sent.append, mine={"NVDA"}) == (0, "")

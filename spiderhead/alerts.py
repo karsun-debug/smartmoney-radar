@@ -28,58 +28,94 @@ class Pending:
     posts: list[tuple[Post, list[Signal]]]
     trades: list[Trade]
     clusters: list = field(default_factory=list)      # insiders.Cluster
+    bank_calls: list = field(default_factory=list)    # banks.BankCall on my tickers
+    mine: set = field(default_factory=set)            # SPIDERHEAD_MY_TICKERS
 
     def __bool__(self) -> bool:
-        return bool(self.posts or self.trades or self.clusters)
+        return bool(self.posts or self.trades or self.clusters or self.bank_calls)
 
     def keys(self) -> list[tuple[str, str]]:
         return ([(p.uid, "post") for p, _ in self.posts] + [(t.uid, "trade") for t in self.trades]
-                + [(c.uid, "cluster") for c in self.clusters])
+                + [(c.uid, "cluster") for c in self.clusters]
+                + [(bank_uid(c), "bank") for c in self.bank_calls])
+
+
+def bank_uid(c) -> str:
+    return f"bank:{c.bank}:{c.ticker}:{c.published}:{c.action}"
+
+
+def my_tickers(env: dict | None = None) -> set[str]:
+    import os
+    raw = (env if env is not None else os.environ).get("SPIDERHEAD_MY_TICKERS", "")
+    return {t.strip().upper() for t in raw.split(",") if t.strip()}
 
 
 def find_pending(store: Store, investors: dict[str, Investor], lookback_days: int = 3,
-                 min_confidence: float = 0.5, include_news: bool = False) -> Pending:
+                 min_confidence: float = 0.5, include_news: bool = False, mine: set[str] | None = None) -> Pending:
     start, end = date.today() - timedelta(days=lookback_days), date.today()
+    mine = my_tickers() if mine is None else mine
     posts = []
     for p in store.posts_between(start, end, kinds=("own", "news")):
         if p.investor_key not in investors:
             continue
         sigs = [s for s in store.signals_for(p)
-                if s.confidence >= min_confidence and not s.ticker.startswith("SECTOR:")
-                and s.stance.value != "neutral" and (include_news or s.is_own_view)]
+                if not s.ticker.startswith("SECTOR:") and s.stance.value != "neutral"
+                and ((s.confidence >= min_confidence and (include_news or s.is_own_view))
+                     or s.ticker in mine)]                    # my tickers: any mention counts
         if sigs:
             posts.append((p, sigs))
     trades = [t for t in store.trades_between(start, end, by="filed") if t.investor_key in investors]
     from .insiders import find_clusters
     clusters = find_clusters(store.insider_buys_between(end - timedelta(days=13), end))
-    seen = store.alerted([p.uid for p, _ in posts] + [t.uid for t in trades] + [c.uid for c in clusters])
-    return Pending([(p, s) for p, s in posts if p.uid not in seen],
-                   [t for t in trades if t.uid not in seen],
-                   [c for c in clusters if c.uid not in seen])
+    banks = [c for c in store.bank_calls(start, end) if c.ticker in mine]
+    seen = store.alerted([p.uid for p, _ in posts] + [t.uid for t in trades] + [c.uid for c in clusters]
+                         + [bank_uid(c) for c in banks])
+    star = lambda tickers: any(t in mine for t in tickers)  # noqa: E731
+    new_posts = [(p, s) for p, s in posts if p.uid not in seen]
+    new_trades = [t for t in trades if t.uid not in seen]
+    new_clusters = [c for c in clusters if c.uid not in seen]
+    # Anything touching my tickers goes first.
+    new_posts.sort(key=lambda ps: not star(s.ticker for s in ps[1]))
+    new_trades.sort(key=lambda t: t.ticker not in mine)
+    new_clusters.sort(key=lambda c: c.ticker not in mine)
+    return Pending(new_posts, new_trades, new_clusters, [c for c in banks if bank_uid(c) not in seen], mine)
 
 
 def format_alert(pending: Pending, investors: dict[str, Investor], limit: int = 15) -> str:
     names = display_names(investors)
     lines = ["🔔 Smartmoney Radar 即時通知"]
+    mine = pending.mine
+    star = lambda t: "⭐ " if t and t.upper() in mine else ""  # noqa: E731
+    if pending.bank_calls:
+        from .banks import BANK_BY_KEY
+        act = {"upgrade": "升評", "downgrade": "降評", "initiate": "首評", "raise_pt": "調高目標價",
+               "cut_pt": "調降目標價", "reiterate": "維持"}
+        for c in pending.bank_calls[:5]:
+            bank = BANK_BY_KEY[c.bank].name if c.bank in BANK_BY_KEY else c.bank
+            lines += ["", f"⭐ 🏦 你追蹤的 {c.ticker}：{bank} {act.get(c.action, c.action)}"
+                          + (f" → {c.rating}" if c.rating else "") + (f"，目標價 ${c.target:,.0f}" if c.target else "")]
+            if c.url:
+                lines.append(f"  {c.url}")
     for t in pending.trades[:limit]:
         size = " · ".join(x for x in (f"{t.shares:,.0f} 股" if t.shares and "股" not in t.amount_text else "",
                                       t.amount_text) if x)
         if t.value_usd and "股" in size:
             size += f"（約 ${t.value_usd / 1e6:,.1f}M）"
-        lines += ["", f"🧾 {names.get(t.investor_key, t.investor_key)} {SIDE.get(t.side, t.side)} "
+        lines += ["", f"{star(t.ticker)}🧾 {names.get(t.investor_key, t.investor_key)} {SIDE.get(t.side, t.side)} "
                       f"{t.ticker or t.issuer[:40]}",
                   f"  {size} · 交易日 {t.traded:%m/%d} · {FORM.get(t.form, t.form)}"]
         if t.url:
             lines.append(f"  {t.url}")
     for c in pending.clusters[:5]:
-        lines += ["", f"🏛 內部人群買 {c.ticker}：{len(c.insiders)} 位內部人買進 ${c.value / 1e6:,.2f}M"
+        lines += ["", f"{star(c.ticker)}🏛 內部人群買 {c.ticker}：{len(c.insiders)} 位內部人買進 ${c.value / 1e6:,.2f}M"
                       f"（{c.first:%m/%d}–{c.last:%m/%d}）",
                   f"  {c.issuer[:60]}"]
     room = max(0, limit - len(pending.trades))
     for p, sigs in pending.posts[:room]:
         views = " ".join(f"{ICON[s.stance.value]}{signal_label(s.ticker, s.sector)}" for s in sigs[:4])
         text = " ".join(p.text.split())
-        lines += ["", f"💬 {names.get(p.investor_key, p.investor_key)}（{p.source}）{views}",
+        mark = "⭐ " if any(s.ticker in mine for s in sigs) else ""
+        lines += ["", f"{mark}💬 {names.get(p.investor_key, p.investor_key)}（{p.source}）{views}",
                   f"  {text[:140]}{'…' if len(text) > 140 else ''}"]
         if p.url:
             lines.append(f"  {p.url}")

@@ -53,6 +53,12 @@ padding-top:max(24px,env(safe-area-inset-top))}
 .tabbar{display:none}
 .offline{display:none;position:sticky;top:0;z-index:30;background:var(--chip);color:var(--ink);font-size:13px;
 padding:6px 12px;border-radius:8px;margin-bottom:8px}
+button.star{font:inherit;font-size:14px;padding:6px 12px;border-radius:999px;border:1px solid var(--border);
+background:var(--surface);color:var(--ink);cursor:pointer;min-height:36px}
+button.star.on{background:var(--series);color:#fff;border-color:var(--series)}
+.my-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.my-card h3{display:flex;justify-content:space-between;align-items:center;margin:0 0 6px}
+.my-card ul{margin:4px 0 0;padding-left:18px}.my-card li{margin:2px 0}
 .more-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .more-grid a{display:block;padding:14px;border-radius:12px;background:var(--surface);border:1px solid var(--border);
 color:var(--ink);text-decoration:none;font-weight:600;min-height:44px}
@@ -150,7 +156,7 @@ def safe_url(url: str | None) -> str | None:
     return None
 
 
-NAV = [("index.html", "總覽"), ("macro.html", "總經"), ("earnings.html", "財報"), ("banks.html", "投行 vs 大神"),
+NAV = [("index.html", "總覽"), ("my.html", "我的追蹤"), ("macro.html", "總經"), ("earnings.html", "財報"), ("banks.html", "投行 vs 大神"),
        ("consensus.html", "大神共同持股"), ("clone.html", "跟單回測"),
        ("insiders.html", "內部人群買"), ("activist.html", "維權持股"), ("retail.html", "散戶 vs 大神"),
        ("buzz.html", "聲量排行"), ("weekly.html", "週報")]
@@ -186,9 +192,10 @@ TAB_ICONS = {
     "bank": '<path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 20h18"/>',
     "earnings": '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 15v2M12 11v6M16 7v10"/>',
     "more": '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+    "star": '<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>',
 }
-TABS = [("index.html", "總覽", "home"), ("macro.html", "總經", "macro"), ("banks.html", "投行", "bank"),
-        ("earnings.html", "財報", "earnings"), ("more.html", "更多", "more")]
+TABS = [("index.html", "總覽", "home"), ("my.html", "我的", "star"), ("macro.html", "總經", "macro"),
+        ("banks.html", "投行", "bank"), ("more.html", "更多", "more")]
 
 
 def _tabbar(root: str, active: str) -> str:
@@ -936,9 +943,61 @@ def _ticker_banks(store: Store, ticker: str) -> str:
             f'<tr><th>日期</th><th>投行</th><th>動作</th><th>評等</th><th class="num">目標價</th></tr>{trs}</table></div>')
 
 
+MY_JS = """
+(function(){
+const KEY='smr-stars';
+function load(){try{return JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){return []}}
+function save(v){try{localStorage.setItem(KEY,JSON.stringify(v))}catch(e){}}
+document.querySelectorAll('button.star[data-ticker]').forEach(b=>{
+ const t=b.dataset.ticker;
+ const paint=()=>{const on=load().includes(t);b.classList.toggle('on',on);b.setAttribute('aria-pressed',on);
+  b.textContent=on?'★ 已追蹤':'☆ 加入追蹤';};
+ b.addEventListener('click',()=>{let s=load();s=s.includes(t)?s.filter(x=>x!==t):[...s,t];save(s);paint();});
+ paint();
+});
+const box=document.getElementById('my-list');
+if(!box)return;
+const root=box.dataset.root||'';
+const stars=load();
+const el=(tag,txt,cls)=>{const e=document.createElement(tag);if(txt!=null)e.textContent=txt;if(cls)e.className=cls;return e;};
+if(!stars.length){box.replaceChildren(el('p','還沒有追蹤任何股票。到任何股票頁按「☆ 加入追蹤」。','empty'));return;}
+const get=f=>fetch(root+'data/'+f).then(r=>r.ok?r.json():[]).catch(()=>[]);
+Promise.all([get('signals.json'),get('trades.json'),get('bank_calls.json'),get('consensus13f.json'),get('investors.json')])
+.then(([sig,tr,bk,cons,inv])=>{
+ const names={};(inv||[]).forEach(i=>names[i.key]=i.name);
+ const nm=k=>names[k]||k;
+ box.replaceChildren();
+ stars.forEach(t=>{
+  const card=el('div',null,'my-card');const h=el('h3');const a=el('a',t);a.href=root+'ticker/'+t+'.html';h.appendChild(a);
+  const rm=el('button','★ 取消','star on');rm.addEventListener('click',()=>{save(load().filter(x=>x!==t));card.remove();});
+  h.appendChild(rm);card.appendChild(h);
+  const newest=(a,b)=>String(b.date||b.traded||'').localeCompare(String(a.date||a.traded||''));
+  const add=(title,items)=>{if(!items.length)return;card.appendChild(el('div',title,'sub'));const ul=el('ul');items.slice(0,5).forEach(x=>ul.appendChild(el('li',x)));card.appendChild(ul);};
+  const side={buy:'買進',sell:'賣出',stake:'持股逾5%',report:'提交申報'};
+  add('實際交易（申報）',tr.filter(x=>x.ticker===t).sort(newest).map(x=>`${x.traded} ${nm(x.investor)} ${side[x.side]||x.side} ${x.amount||''}`));
+  add('大神看法',sig.filter(x=>x.ticker===t&&x.own_view).sort(newest).map(x=>`${x.date} ${nm(x.investor)} ${x.stance==='bullish'?'看多':x.stance==='bearish'?'看空':'中性'}`));
+  const act={upgrade:'升評',downgrade:'降評',initiate:'首評',raise_pt:'調高目標價',cut_pt:'調降目標價',reiterate:'維持'};
+  add('投行評等',bk.filter(x=>x.ticker===t).sort(newest).map(x=>`${x.date} ${x.bank_name||x.bank} ${act[x.action]||x.action}${x.target?' 目標 $'+x.target:''}`));
+  const c=cons.find(x=>x.ticker===t);
+  if(c&&Object.keys(c.owners||{}).length)add('13F 持有的大神',[Object.keys(c.owners).map(nm).join('、')]);
+  if(card.children.length===1)card.appendChild(el('p','最近沒有相關動態。','sub'));
+  box.appendChild(card);
+ });
+});
+})();
+"""
+
+
+def render_my() -> str:
+    body = ('<h1>我的追蹤</h1><p class="sub">追蹤清單存在這支手機（或這台電腦）的瀏覽器裡，不會上傳。'
+            '想要「有人動到我的股票就通知」，在 GitHub Secrets 設定 <code>SPIDERHEAD_MY_TICKERS</code>（例如 NVDA,TSLA）。</p>'
+            '<div id="my-list" data-root=""><p class="empty">載入中…（需要用網址開啟，直接開檔案時看不到）</p></div>')
+    return _page("我的追蹤 · Smartmoney Radar", body, "", "my.html")
+
+
 def render_more() -> str:
     """Phone menu: every page as a big button, plus how to install and get notifications."""
-    desc = {"index.html": "大神動態、產業熱度、評分卡", "macro.html": "利率、通膨、就業、VIX",
+    desc = {"index.html": "大神動態、產業熱度、評分卡", "my.html": "你加星號的股票", "macro.html": "利率、通膨、就業、VIX",
             "earnings.html": "營收、獲利、毛利率", "banks.html": "投行評等準不準、有沒有出貨",
             "consensus.html": "最多大神持有的股票", "clone.html": "照抄 13F 能不能贏大盤",
             "insiders.html": "多位內部人同時買進", "activist.html": "13D / 13G 大額持股",
@@ -1031,7 +1090,8 @@ def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
                                   0, height=120, unit=" 美元", vmin=min(c for _, c in series)) + "</div>")
     bulls = sum(1 for s in rows if s.stance.value == "bullish")
     bears = sum(1 for s in rows if s.stance.value == "bearish")
-    body = (f'<p class="sub"><a href="../index.html">← 總覽</a></p><header class="top"><h1>{esc(ticker)}</h1>'
+    body = (f'<p class="sub"><a href="../index.html">← 總覽</a></p><header class="top"><h1>{esc(ticker)} '
+            f'<button class="star" data-ticker="{esc(ticker)}" aria-pressed="false">☆ 加入追蹤</button></h1>'
             f'<span class="sub">{days} 天內被提到 {len(rows)} 次 · ▲ {bulls} / ▼ {bears}</span></header>'
             f'{chart}<h2>誰在談</h2>{talk}<h2>大神的實際交易（對帳單）</h2>'
             f'{trades_table(trades, names, "../")}'
@@ -1248,8 +1308,9 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     (out / "banks.html").write_text(render_banks(store, names, prices), encoding="utf-8")
     (out / "earnings.html").write_text(render_earnings(store), encoding="utf-8")
     (out / "more.html").write_text(render_more(), encoding="utf-8")
+    (out / "my.html").write_text(render_my(), encoding="utf-8")
     from .pwa import write_pwa
-    write_pwa(out, ["index.html", "more.html", "macro.html", "earnings.html", "banks.html", "consensus.html",
+    write_pwa(out, ["index.html", "more.html", "my.html", "macro.html", "earnings.html", "banks.html", "consensus.html",
                     "weekly.html"])
     (out / "activist.html").write_text(render_activist(store, names), encoding="utf-8")
     (out / "clone.html").write_text(render_clone(clones, names, prices is not None), encoding="utf-8")
@@ -1276,6 +1337,6 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     index = [[f"{t}", f"ticker/{_slug(t)}.html"] for t in sorted(tickers)]
     index += [[f"{inv.name}（{inv.fund}）", f"investor/{inv.key}.html"] for inv in investors.values()]
     (out / "assets" / "app.js").write_text(
-        JS + "\nwindow.SH_INDEX=" + json.dumps(index, ensure_ascii=False) + ";\n" + SEARCH_JS + REGISTER_JS,
+        JS + "\nwindow.SH_INDEX=" + json.dumps(index, ensure_ascii=False) + ";\n" + SEARCH_JS + MY_JS + REGISTER_JS,
         encoding="utf-8")
     return out / "index.html"
