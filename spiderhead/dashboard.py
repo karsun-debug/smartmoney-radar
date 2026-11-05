@@ -120,7 +120,7 @@ def safe_url(url: str | None) -> str | None:
 
 
 NAV = [("index.html", "總覽"), ("consensus.html", "大神共同持股"), ("clone.html", "跟單回測"),
-       ("insiders.html", "內部人群買")]
+       ("insiders.html", "內部人群買"), ("retail.html", "散戶 vs 大神")]
 
 
 def _nav(root: str, active: str) -> str:
@@ -452,6 +452,25 @@ def render_insiders(store: Store, window_days: int = 14, min_insiders: int = 3) 
     return _page("內部人群買 · Smartmoney Radar", f"<h1>內部人群買</h1>{note}{''.join(blocks)}", "", "insiders.html")
 
 
+def render_retail(store: Store, names: dict[str, str], days: int = 7) -> str:
+    from .retail import retail_vs_gurus
+    end = date.today()
+    rows = retail_vs_gurus(store, end - timedelta(days=days - 1), end)
+    note = (f'<p class="sub">最近 {days} 天 Reddit（r/wallstreetbets、r/stocks、r/investing）最多人討論的股票，'
+            f'對照大神本人的看法。「看法相反」= 散戶明顯偏多/偏空，而大神站在另一邊。</p>')
+    if not rows:
+        return _page("散戶 vs 大神 · Smartmoney Radar",
+                     f'<h1>散戶 vs 大神</h1>{note}<p class="empty">還沒有散戶資料，執行 <code>spiderhead fetch</code>。</p>',
+                     "", "retail.html")
+    trs = "".join(
+        f'<tr><td>{_tick(r.ticker, "")}</td><td class="num">{r.mentions}</td><td>{_mood(r.retail_mood)}</td>'
+        f'<td>{" ".join(_badge(v, names.get(k, k)) for k, v in sorted(r.guru_views.items())) or "—"}</td>'
+        f'<td>{_badge("bearish", "看法相反") if r.divergent else ""}</td></tr>' for r in rows)
+    table = ('<div class="tablewrap"><table><tr><th>標的</th><th class="num">散戶討論數</th><th>散戶情緒</th>'
+             '<th>大神看法</th><th></th></tr>' + trs + '</table></div>')
+    return _page("散戶 vs 大神 · Smartmoney Radar", f"<h1>散戶 vs 大神</h1>{note}{table}", "", "retail.html")
+
+
 def render_consensus(c, names: dict[str, str]) -> str:
     if not c.quarters:
         body = ('<h1>大神共同持股</h1><p class="empty">還沒有 13F 歷史資料。執行 '
@@ -707,6 +726,7 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     consensus = build_consensus(store, investors)
     (out / "consensus.html").write_text(render_consensus(consensus, names), encoding="utf-8")
     (out / "insiders.html").write_text(render_insiders(store), encoding="utf-8")
+    (out / "retail.html").write_text(render_retail(store, names), encoding="utf-8")
     from .clone import backtest_all
     clones = backtest_all(store, investors, prices) if prices is not None else []
     (out / "clone.html").write_text(render_clone(clones, names, prices is not None), encoding="utf-8")

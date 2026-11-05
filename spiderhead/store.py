@@ -118,13 +118,16 @@ class Store:
             args.append(investor)
         return [self._post(r) for r in self.db.execute(q + " ORDER BY published DESC", args)]
 
-    def signals_between(self, start: date, end: date) -> list[Signal]:
+    def signals_between(self, start: date, end: date,
+                        kinds: tuple[str, ...] = ("own", "news", "industry")) -> list[Signal]:
+        """Signals from posts in [start, end]. Retail chatter (kind "retail") is
+        excluded unless asked for, so it never mixes into investor trends."""
         rows = self.db.execute(
             "SELECT p.investor, p.published, p.text, p.source, p.url, p.kind,"
             " s.ticker, s.stance, s.confidence, s.rationale, s.sector, s.attributed"
             " FROM signals s JOIN posts p ON p.uid = s.post_uid"
-            " WHERE p.published >= ? AND p.published <= ?",
-            (start.isoformat(), end.isoformat())).fetchall()
+            f" WHERE p.published >= ? AND p.published <= ? AND p.kind IN ({','.join('?' * len(kinds))})",
+            (start.isoformat(), end.isoformat(), *kinds)).fetchall()
         return [Signal(r[6], Stance(r[7]), r[8], r[9], self._post(r[:6]), r[10] or "other",
                        bool(r[11])) for r in rows]
 

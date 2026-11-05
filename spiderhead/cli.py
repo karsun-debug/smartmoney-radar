@@ -14,10 +14,17 @@ from .report import consistency_markdown, feed_markdown, holdings_markdown, tren
 from .watchlist import load_watchlist
 
 
-def _analyze_pending(store, analyzer) -> int:
+def _analyze_pending(store, analyzer, retail=None) -> int:
     done = 0
     for post in store.unanalyzed():
-        signals = analyzer.analyze(post)
+        if post.kind == "retail":
+            if retail is None:
+                from .retail import RetailAnalyzer, known_tickers
+                from .store import window
+                retail = RetailAnalyzer(known_tickers(store, *window(180)))
+            signals = retail.analyze(post)        # cheap keywords; never sent to Claude
+        else:
+            signals = analyzer.analyze(post)
         if signals is None:            # deferred (LLM budget used up this run)
             continue
         store.save_signals(post, signals)
@@ -123,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="每次最多送幾則給 Claude（其餘延到下次，控制費用）")
     f.add_argument("--no-trades", action="store_true",
                    help="skip Form 4 / 13D / congress trade collection")
+    f.add_argument("--no-retail", action="store_true", help="skip Reddit retail chatter")
 
     im = sub.add_parser("import", help="匯入手動整理的貼文 JSON/JSONL")
     im.add_argument("posts_file")
@@ -245,6 +253,14 @@ def _store_commands(args, investors) -> int:
             store.log_results(collector.health.results)
             for err in collector.errors:
                 print(f"warning: {err}", file=sys.stderr)
+            if not args.no_retail:
+                from .health import HealthLog
+                from .retail import collect_retail
+                from .sources import _requests_get
+                hl = HealthLog()
+                posts += [p for p in collect_retail(_requests_get, health=hl)
+                          if p.published >= date.today() - timedelta(days=args.days)]
+                store.log_results(hl.results)
         else:
             posts = load_posts_json(args.posts_file)
         added = store.add_posts(posts)
