@@ -70,7 +70,8 @@ border-radius:6px;padding:4px 8px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0
 background:var(--chip);color:var(--ink);white-space:nowrap}
 .badge.bull .i{color:var(--bull)}.badge.bear .i{color:var(--bear)}.badge.neutral .i{color:var(--muted)}
 table{width:100%;border-collapse:collapse;font-size:14px}
-th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--grid);vertical-align:top}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--grid);vertical-align:top;white-space:nowrap}
+td.wrap,th.wrap{white-space:normal;min-width:220px}
 th{color:var(--ink-2);font-weight:500;font-size:13px}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 .feed{list-style:none;margin:0;padding:0}
@@ -345,7 +346,7 @@ def health_table(statuses) -> str:
         err = f'<div class="sub">{esc(h.last_error[:140])}</div>' if h.last_error else ""
         rows.append(f'<tr><td>{esc(h.name)}</td><td><span class="badge {cls}"><span class="i">{i}</span>{label}</span></td>'
                     f'<td>{last_ok}</td><td class="num">{h.ok_now}/{h.ok_now + h.failing_now}</td>'
-                    f'<td class="num">{h.items_7d}</td><td>{err}</td></tr>')
+                    f'<td class="num">{h.items_7d}</td><td class="wrap">{err}</td></tr>')
     return ('<div class="tablewrap"><table><tr><th>來源</th><th>狀態</th><th>最後成功</th>'
             '<th class="num">最近一次</th><th class="num">7 天筆數</th><th>錯誤</th></tr>'
             + "".join(rows) + '</table></div>')
@@ -381,7 +382,7 @@ def history_html(history) -> str:
         f'<tr><td>{esc(h.quarter)}</td><td class="num">${h.total_value / 1e9:,.2f}B'
         f'<div class="track" style="height:6px;margin-top:4px"><div style="height:6px;border-radius:0 3px 3px 0;'
         f'background:var(--series);width:{h.total_value / vmax * 100:.1f}%"></div></div></td>'
-        f'<td class="num">{h.positions}</td><td>'
+        f'<td class="num">{h.positions}</td><td class="wrap">'
         + "、".join(f"{esc(label)} {w * 100:.1f}%" for label, w in h.top) + "</td></tr>"
         for h in history)
     return ('<h3>各季持倉概況</h3><div class="tablewrap"><table><tr><th>季度</th>'
@@ -416,7 +417,7 @@ def clone_periods_table(res, root: str) -> str:
     rows = "".join(
         f'<tr><td>{esc(p.quarter)}</td><td>{p.entry} → {p.exit}</td>'
         f'<td class="num">{_pct(p.ret)}</td><td class="num">{_pct(p.bench)}</td>'
-        f'<td class="num">{p.coverage * 100:.0f}%</td><td>'
+        f'<td class="num">{p.coverage * 100:.0f}%</td><td class="wrap">'
         + "、".join(f"{_tick(t, root)} {_pct(r)}" for t, _, r in sorted(p.holdings, key=lambda x: -x[1])[:5])
         + "</td></tr>" for p in reversed(res.periods))
     return ('<div class="tablewrap"><table><tr><th>13F 季度</th><th>持有期間（公布日起）</th>'
@@ -484,7 +485,7 @@ def render_retail(store: Store, names: dict[str, str], days: int = 7) -> str:
                      "", "retail.html")
     trs = "".join(
         f'<tr><td>{_tick(r.ticker, "")}</td><td class="num">{r.mentions}</td><td>{_mood(r.retail_mood)}</td>'
-        f'<td>{" ".join(_badge(v, names.get(k, k)) for k, v in sorted(r.guru_views.items())) or "—"}</td>'
+        f'<td class="wrap">{" ".join(_badge(v, names.get(k, k)) for k, v in sorted(r.guru_views.items())) or "—"}</td>'
         f'<td>{_badge("bearish", "看法相反") if r.divergent else ""}</td></tr>' for r in rows)
     table = ('<div class="tablewrap"><table><tr><th>標的</th><th class="num">散戶討論數</th><th>散戶情緒</th>'
              '<th>大神看法</th><th></th></tr>' + trs + '</table></div>')
@@ -516,7 +517,8 @@ def render_consensus(c, names: dict[str, str]) -> str:
         if not rows:
             return '<p class="empty">沒有資料。</p>'
         head = "".join(f'<th{" class=num" if n else ""}>{esc(h)}</th>' for h, n, _ in cols)
-        body = "".join("<tr>" + "".join(f'<td{" class=num" if n else ""}>{f(r)}</td>' for _, n, f in cols)
+        cls = lambda h, n: " class=num" if n else (" class=wrap" if h.startswith(("誰", "同時")) else "")  # noqa: E731
+        body = "".join("<tr>" + "".join(f'<td{cls(h, n)}>{f(r)}</td>' for h, n, f in cols)
                        + "</tr>" for r in rows)
         return f'<div class="tablewrap"><table><tr>{head}</tr>{body}</table></div>'
 
@@ -552,7 +554,7 @@ def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
     talk = "".join(
         f'<tr><td>{s.post.published}</td><td><a href="../investor/{esc(s.post.investor_key)}.html">'
         f'{esc(names.get(s.post.investor_key, s.post.investor_key))}</a></td><td>{_badge(s.stance.value)}</td>'
-        f'<td>{esc(s.rationale[:120])}</td></tr>' for s in rows[:50])
+        f'<td class="wrap">{esc(s.rationale[:120])}</td></tr>' for s in rows[:50])
     talk = (f'<div class="tablewrap"><table><tr><th>日期</th><th>誰</th><th>看法</th><th>依據</th></tr>{talk}</table></div>'
             if rows else '<p class="empty">期間內沒有大神提到。</p>')
     chart = ""
@@ -615,7 +617,7 @@ def render_index(store: Store, investors: dict[str, Investor], days: int, step: 
 
     if recent.consensus:
         crow = "".join(
-            f'<tr><td><strong>{esc(c.ticker)}</strong></td><td class="num">{c.investors}</td><td>'
+            f'<tr><td><strong>{esc(c.ticker)}</strong></td><td class="num">{c.investors}</td><td class="wrap">'
             + " ".join(_badge(st.value, names.get(k, k)) for k, st in sorted(c.views.items()))
             + "</td></tr>" for c in recent.consensus)
         cons = (f'<div class="tablewrap"><table><tr><th>標的</th><th class="num">人數</th>'
