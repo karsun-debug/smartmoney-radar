@@ -82,6 +82,9 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--ink-2);font-size:13px}
 .note{color:var(--ink-2);font-size:14px;margin:8px 0 0}
 .empty{color:var(--muted);font-size:14px}
 footer{margin-top:48px;color:var(--muted);font-size:12px}
+nav.top{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:14px;margin:0 0 18px;padding-bottom:10px;border-bottom:1px solid var(--grid)}
+nav.top a{text-decoration:none;color:var(--ink-2)}nav.top a.on{color:var(--ink);font-weight:600}
+nav.top .brand{color:var(--ink);font-weight:700;margin-right:8px}
 """
 
 JS = """
@@ -116,11 +119,20 @@ def safe_url(url: str | None) -> str | None:
     return None
 
 
-def _page(title: str, body: str, root: str) -> str:
+NAV = [("index.html", "總覽"), ("consensus.html", "大神共同持股")]
+
+
+def _nav(root: str, active: str) -> str:
+    links = "".join(f'<a href="{root}{href}"{" class=on" if href == active else ""}>{esc(label)}</a>'
+                    for href, label in NAV)
+    return f'<nav class="top"><a class="brand" href="{root}index.html">Smartmoney Radar</a>{links}</nav>'
+
+
+def _page(title: str, body: str, root: str, active: str = "") -> str:
     return (f'<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(title)}</title><link rel="stylesheet" href="{root}assets/style.css"></head>'
-            f'<body><main>{body}<footer>Smartmoney Radar · 資料來自公開貼文、新聞與 SEC 申報 · '
+            f'<body><main>{_nav(root, active)}{body}<footer>Smartmoney Radar · 資料來自公開貼文、新聞與 SEC 申報 · '
             f'僅供研究參考，不構成投資建議 · 產生於 {datetime.now():%Y-%m-%d %H:%M}</footer></main>'
             f'<script src="{root}assets/app.js"></script></body></html>')
 
@@ -356,8 +368,70 @@ def history_html(history) -> str:
             f'{rows}</table></div>')
 
 
+def _who(keys, names: dict[str, str], extra: dict[str, str] | None = None) -> str:
+    label = {"NEW": "新建倉", "ADD": "加碼", "TRIM": "減碼", "EXIT": "清倉"}
+    return "、".join(
+        f'<a href="investor/{esc(k)}.html">{esc(names.get(k, k))}</a>'
+        + (f'<span class="sub">（{label.get(extra[k], extra[k])}）</span>' if extra and k in extra else "")
+        for k in sorted(keys, key=lambda k: names.get(k, k)))
+
+
+def _ticker_13f(consensus, ticker: str, names: dict[str, str]) -> str:
+    row = consensus.rows.get(ticker) if consensus else None
+    if not row or not (row.owners or row.sold):
+        return ""
+    label = {"NEW": "新建倉", "ADD": "加碼", "TRIM": "減碼", "EXIT": "清倉"}
+    keys = sorted(set(row.owners) | set(row.sold), key=lambda k: -row.owners.get(k, 0))
+    trs = "".join(
+        f'<tr><td><a href="../investor/{esc(k)}.html">{esc(names.get(k, k))}</a></td>'
+        f'<td class="num">{row.owners.get(k, 0) * 100:.2f}%</td>'
+        f'<td>{esc(label.get(row.bought.get(k) or row.sold.get(k) or "", "不變"))}</td>'
+        f'<td>{esc(consensus.quarters.get(k, ""))}</td></tr>' for k in keys)
+    return ('<h2>13F：哪些大神持有</h2><div class="tablewrap"><table><tr><th>大神</th>'
+            '<th class="num">占其組合</th><th>最新一季動作</th><th>季度</th></tr>' + trs + '</table></div>')
+
+
+def render_consensus(store: Store, investors: dict[str, Investor], names: dict[str, str]) -> str:
+    from .consensus13f import build_consensus
+    c = build_consensus(store, investors)
+    if not c.quarters:
+        body = ('<h1>大神共同持股</h1><p class="empty">還沒有 13F 歷史資料。執行 '
+                '<code>spiderhead dashboard --with-13f</code> 下載最近 4 季後就會出現。</p>')
+        return _page("大神共同持股 · Smartmoney Radar", body, "", "consensus.html")
+
+    def table(rows, cols) -> str:
+        if not rows:
+            return '<p class="empty">沒有資料。</p>'
+        head = "".join(f'<th{" class=num" if n else ""}>{esc(h)}</th>' for h, n, _ in cols)
+        body = "".join("<tr>" + "".join(f'<td{" class=num" if n else ""}>{f(r)}</td>' for _, n, f in cols)
+                       + "</tr>" for r in rows)
+        return f'<div class="tablewrap"><table><tr>{head}</tr>{body}</table></div>'
+
+    tick = lambda r: (_tick(r.key, "") if r.key.isupper() and len(r.key) <= 6  # noqa: E731
+                      else f"<strong>{esc(r.issuer[:40])}</strong>")
+    owned = table(c.most_owned(), [
+        ("標的", False, tick), ("持有人數", True, lambda r: str(len(r.owners))),
+        ("平均占組合", True, lambda r: f"{r.avg_weight * 100:.1f}%"),
+        ("合計市值", True, lambda r: f"${r.value / 1e9:,.2f}B"),
+        ("誰持有", False, lambda r: _who(r.owners, names))])
+    bought = table(c.most_bought(), [
+        ("標的", False, tick), ("買進人數", True, lambda r: str(len(r.bought))),
+        ("誰買", False, lambda r: _who(r.bought, names, r.bought)),
+        ("同時有人賣", False, lambda r: _who(r.sold, names, r.sold) or "—")])
+    sold = table(c.most_sold(), [
+        ("標的", False, tick), ("賣出人數", True, lambda r: str(len(r.sold))),
+        ("誰賣", False, lambda r: _who(r.sold, names, r.sold)),
+        ("同時有人買", False, lambda r: _who(r.bought, names, r.bought) or "—")])
+    qs = "、".join(f"{names.get(k, k)} {q}" for k, q in sorted(c.quarters.items()))
+    body = (f'<h1>大神共同持股</h1><p class="sub">依各人最新一季 13F（{esc(qs)}）。選擇權部位不計入。'
+            f'13F 有最多 135 天落後，請搭配「即時對帳單」看最新動作。</p>'
+            f'<h2>最多大神持有</h2>{owned}<h2>本季最多大神買進（新建倉或加碼）</h2>{bought}'
+            f'<h2>本季最多大神賣出（減碼或清倉）</h2>{sold}')
+    return _page("大神共同持股 · Smartmoney Radar", body, "", "consensus.html")
+
+
 def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
-                  prices: PriceBook | None) -> str:
+                  prices: PriceBook | None, consensus=None) -> str:
     start, end = window(days)
     sigs = [s for s in store.signals_between(start, end) if s.ticker == ticker]
     trades = store.trades_between(start - timedelta(days=90), end, ticker=ticker)
@@ -380,7 +454,8 @@ def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
     body = (f'<p class="sub"><a href="../index.html">← 總覽</a></p><header class="top"><h1>{esc(ticker)}</h1>'
             f'<span class="sub">{days} 天內被提到 {len(rows)} 次 · ▲ {bulls} / ▼ {bears}</span></header>'
             f'{chart}<h2>誰在談</h2>{talk}<h2>大神的實際交易（對帳單）</h2>'
-            f'{trades_table(trades, names, "../")}')
+            f'{trades_table(trades, names, "../")}'
+            f'{_ticker_13f(consensus, ticker, names)}')
     return _page(f"{ticker} · Smartmoney Radar", body, "../")
 
 
@@ -457,7 +532,7 @@ def render_index(store: Store, investors: dict[str, Investor], days: int, step: 
             f'<h2>大神</h2><div class="grid">{"".join(inv_cards)}</div>'
             f'<h2>最新動態</h2>{_feed_html(recent.feed, names, "")}'
             f'<h2>資料來源狀態</h2>{health_table(store.source_health())}')
-    return _page("Smartmoney Radar 大神追蹤", body, "")
+    return _page("Smartmoney Radar 大神追蹤", body, "", "index.html")
 
 
 def render_investor(store: Store, inv: Investor, names: dict[str, str], days: int, step: int,
@@ -542,7 +617,7 @@ def render_investor(store: Store, inv: Investor, names: dict[str, str], days: in
             f'<h2>喊單成績</h2>{calls_table(my_calls, "../")}'
             f'<h2>13F 季度持倉</h2>{h13}'
             f'<h2>發文紀錄</h2>{_feed_html(prof.posts, names, "../", limit=100, link_investor=False)}')
-    return _page(f"{inv.name} · Smartmoney Radar", body, "../")
+    return _page(f"{inv.name} · Smartmoney Radar", body, "../", "")
 
 
 def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path,
@@ -563,13 +638,18 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     calls = score_calls(store.signals_between(start - timedelta(days=270), end), prices) if prices else []
     (out / "index.html").write_text(render_index(store, investors, days, step, calls=calls),
                                     encoding="utf-8")
+    (out / "consensus.html").write_text(render_consensus(store, investors, names), encoding="utf-8")
+    from .consensus13f import build_consensus
+    consensus = build_consensus(store, investors)
     for inv in investors.values():
         page = render_investor(store, inv, names, days, step, (holdings or {}).get(inv.key), calls)
         (out / "investor" / f"{inv.key}.html").write_text(page, encoding="utf-8")
     tickers = {s.ticker for s in store.signals_between(start, end)
                if not s.ticker.startswith(("SECTOR:", "MACRO:"))}
     tickers |= {t.ticker for t in store.trades_between(start - timedelta(days=90), end) if t.ticker}
+    tickers |= {r.key for r in consensus.most_owned(25) + consensus.most_bought() + consensus.most_sold()
+                if r.key.isupper() and len(r.key) <= 6}
     for t in sorted(tickers):
         (out / "ticker" / f"{_slug(t)}.html").write_text(
-            render_ticker(store, t, names, days, prices), encoding="utf-8")
+            render_ticker(store, t, names, days, prices, consensus), encoding="utf-8")
     return out / "index.html"

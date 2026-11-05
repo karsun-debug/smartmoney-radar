@@ -71,3 +71,27 @@ def test_refresh_13f_skips_known_quarters(monkeypatch):
     assert len(fetched) == 2                               # nothing re-downloaded
     health = {h.family: h for h in store.source_health()}
     assert health["sec13f"].level == "ok"
+
+
+def test_consensus_page_and_ticker_owners(tmp_path):
+    from spiderhead.consensus13f import build_consensus
+    store = _store()
+    # Ackman: holds AAPL both quarters and adds; buys KO new.
+    from spiderhead.models import Holding
+    store.save_13f("ackman", "2026-06-30", "b1", [Holding("APPLE INC", "037833100", "COM", 10_000, 50)],
+                   lambda h: "AAPL")
+    store.save_13f("ackman", "2026-09-30", "b2", [Holding("APPLE INC", "037833100", "COM", 20_000, 90),
+                                                 Holding("COCA COLA CO", "191216100", "COM", 5_000, 70)],
+                   lambda h: {"037833100": "AAPL", "191216100": "KO"}[h.cusip])
+    c = build_consensus(store, load_watchlist())
+    top = c.most_owned()[0]
+    assert top.key == "AAPL" and set(top.owners) == {"buffett", "ackman"}
+    ko = c.rows["KO"]
+    assert ko.bought == {"ackman": "NEW"} and set(ko.owners) == {"buffett", "ackman"}
+    assert "SPY" not in c.rows                                 # options excluded
+    assert c.rows["SNOW"].sold == {"buffett": "EXIT"}
+    build_site(store, load_watchlist(), tmp_path, days=7)
+    page = (tmp_path / "consensus.html").read_text(encoding="utf-8")
+    assert "最多大神持有" in page and "Bill Ackman" in page
+    tpage = (tmp_path / "ticker" / "AAPL.html").read_text(encoding="utf-8")
+    assert "13F：哪些大神持有" in tpage and "Warren Buffett" in tpage
