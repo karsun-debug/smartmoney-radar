@@ -53,9 +53,18 @@ def gather(store: Store, investors: dict[str, Investor], days: int = 7, end: dat
                  "value_musd": round(c.value / 1e6, 2)} for c in d.clusters[:8]]
     payload = {"period": f"{d.start} ~ {d.end}", "sector_trends": trends, "consensus_tickers": consensus,
                "filed_trades": trades, "own_calls": calls[:40], "say_vs_do_contradictions": contradictions,
-               "insider_clusters": clusters,
+               "insider_clusters": clusters, "macro": _macro_snapshot(store),
                "broken_sources": [h.name for h in d.health if h.level == "fail"]}
     return WeekData(d.start, d.end, payload)
+
+
+def _macro_snapshot(store: Store) -> dict:
+    from .macro import load_views, signals
+    views = load_views(store, years=1)
+    return {"indicators": [{"name": m.series.name, "latest": round(m.latest[1], 2), "date": str(m.latest[0]),
+                            "change_1m": None if m.change(30) is None else round(m.change(30), 2)}
+                           for m in views if m.latest],
+            "signals": [{"name": s.name, "level": s.level, "text": s.text} for s in signals(views)]}
 
 
 def template_report(w: WeekData) -> str:
@@ -78,6 +87,11 @@ def template_report(w: WeekData) -> str:
         lines += ["", "## 言行不一"] + [f"- {c['who']} 公開{'看多' if c['said'] == 'bullish' else '看空'} {c['ticker']}，"
                                        f"但申報顯示{side.get(c['did'], c['did'])}（{c['trade_date']}）"
                                        for c in p["say_vs_do_contradictions"]]
+    macro = p.get("macro") or {}
+    if macro.get("signals"):
+        mark = {"ok": "✅", "warn": "⚠️", "alert": "🚨"}
+        lines += ["", "## 總經訊號"] + [f"- {mark.get(s['level'], '')} {s['name']}：{s['text']}"
+                                       for s in macro["signals"]]
     if p["insider_clusters"]:
         lines += ["", "## 內部人群買"] + [f"- {c['ticker']}（{c['issuer']}）：{c['insiders']} 位內部人買進 "
                                          f"${c['value_musd']}M" for c in p["insider_clusters"]]
@@ -98,6 +112,7 @@ Write Markdown with these sections, in order, skipping any with no data:
 ## 大神實際動作
 ## 言行不一
 ## 內部人群買
+## 總經 — from the macro block: the signals and the biggest 1-month moves
 ## 資料提醒 — only if broken_sources is non-empty
 
 Rules: use only facts present in the JSON; name the investor and ticker for each \

@@ -122,9 +122,9 @@ def safe_url(url: str | None) -> str | None:
     return None
 
 
-NAV = [("index.html", "總覽"), ("consensus.html", "大神共同持股"), ("clone.html", "跟單回測"),
+NAV = [("index.html", "總覽"), ("macro.html", "總經"), ("consensus.html", "大神共同持股"), ("clone.html", "跟單回測"),
        ("insiders.html", "內部人群買"), ("activist.html", "維權持股"), ("retail.html", "散戶 vs 大神"),
-       ("weekly.html", "週報")]
+       ("buzz.html", "聲量排行"), ("weekly.html", "週報")]
 
 
 def _nav(root: str, active: str) -> str:
@@ -561,6 +561,90 @@ def render_activist(store: Store, names: dict[str, str], days: int = 365) -> str
                  "", "activist.html")
 
 
+def render_buzz(store: Store, investors: dict[str, Investor], names: dict[str, str]) -> str:
+    from .buzz import buzz_table
+    rows = buzz_table(store, investors)
+    note = ('<p class="sub">網路聲量＝維基百科條目每日瀏覽量（真人，排除機器人）＋新聞與本人發文則數。'
+            '聲量突然暴增，常代表有重大發言、交易或爭議。</p>')
+    has_views = any(b.series for b in rows)
+    vmax = max((v for b in rows for _, v in b.series), default=1)
+    trs = []
+    for b in rows:
+        spark = ""
+        if len(b.series) > 1:
+            spark = line_chart([f"{d:%m/%d}" for d, _ in b.series], [v for _, v in b.series], vmax,
+                               height=36, unit=" 次")
+        trs.append(
+            f'<tr><td><a href="investor/{esc(b.investor)}.html">{esc(names.get(b.investor, b.investor))}</a></td>'
+            f'<td class="num">{b.views_7d:,}<div class="sub">{_pct(b.views_change)}</div></td>'
+            f'<td class="num">{b.news_7d}<div class="sub">{_pct(b.news_change)}</div></td>'
+            f'<td class="wrap" style="min-width:200px">{spark or "—"}</td></tr>')
+    table = ('<div class="tablewrap"><table><tr><th>大神</th><th class="num">維基瀏覽（7 天）</th>'
+             '<th class="num">新聞/發文（7 天）</th><th class="wrap">近 60 天瀏覽走勢</th></tr>'
+             + "".join(trs) + '</table></div>')
+    if not has_views:
+        note += '<p class="empty">還沒有瀏覽量資料，執行 <code>spiderhead fetch</code> 後就會出現。</p>'
+    return _page("聲量排行 · Smartmoney Radar", f"<h1>聲量排行</h1>{note}{table}", "", "buzz.html")
+
+
+def _thin(points, max_points: int = 160):
+    if len(points) <= max_points:
+        return points
+    step = len(points) / max_points
+    picked = [points[int(i * step)] for i in range(max_points)]
+    return picked[:-1] + [points[-1]]
+
+
+def _fmt(v: float, unit: str) -> str:
+    if abs(v) >= 1000:
+        return f"{v:,.0f}"
+    return f"{v:,.2f}"
+
+
+def render_macro(store: Store, names: dict[str, str]) -> str:
+    from .macro import load_views, signals
+    views = load_views(store)
+    have = [m for m in views if len(m.points) > 1]
+    lvl = {"ok": ("bull", "✓", "正常"), "warn": ("neutral", "!", "留意"), "alert": ("bear", "✕", "警訊")}
+    sig_rows = "".join(
+        f'<tr><td>{esc(s.name)}</td><td><span class="badge {lvl[s.level][0]}"><span class="i">{lvl[s.level][1]}'
+        f'</span>{lvl[s.level][2]}</span></td><td class="wrap">{esc(s.text)}</td></tr>' for s in signals(views))
+    sig_html = (f'<div class="tablewrap"><table><tr><th>指標</th><th>狀態</th><th class="wrap">說明</th></tr>'
+                f'{sig_rows}</table></div>') if sig_rows else ""
+    cards = []
+    for m in have:
+        pts = _thin(m.points)
+        vals = [round(v, 4) for _, v in pts]
+        d, v = m.latest
+        c1, c12 = m.change(30), m.change(365)
+        chg = " · ".join(x for x in (
+            f"1 個月 {c1:+,.2f}" if c1 is not None else "", f"1 年 {c12:+,.2f}" if c12 is not None else "") if x)
+        cards.append(f'<div class="card"><h3>{esc(m.series.name)}</h3>'
+                     f'<div class="meta"><span><strong style="font-size:20px;color:var(--ink)">'
+                     f'{_fmt(v, m.series.unit)}</strong> {esc(m.series.unit)}</span><span>{d}</span></div>'
+                     f'{line_chart([f"{x:%Y/%m/%d}" for x, _ in pts], vals, max(vals), height=72, unit=" " + m.series.unit, vmin=min(vals))}'
+                     f'<div class="sub">{esc(chg)}{" · " if chg and m.series.note else ""}{esc(m.series.note)}</div></div>')
+    grid = (f'<div class="grid">{"".join(cards)}</div>' if cards else
+            '<p class="empty">還沒有總經資料，執行 <code>spiderhead fetch</code>（資料來自 FRED，免費）。</p>')
+    end = date.today()
+    views_rows = []
+    seen = set()
+    for s in sorted(store.signals_between(end - timedelta(days=60), end), key=lambda s: s.post.published, reverse=True):
+        if not s.is_own_view or (s.sector != "macro" and not s.ticker.startswith("MACRO:")) or s.post.uid in seen:
+            continue
+        seen.add(s.post.uid)
+        views_rows.append(f'<tr><td>{s.post.published}</td><td><a href="investor/{esc(s.post.investor_key)}.html">'
+                          f'{esc(names.get(s.post.investor_key, s.post.investor_key))}</a></td>'
+                          f'<td>{_badge(s.stance.value)}</td><td class="wrap">{esc(s.post.text[:160])}</td></tr>')
+    guru = (f'<div class="tablewrap"><table><tr><th>日期</th><th>誰</th><th>看法</th><th class="wrap">內容</th></tr>'
+            f'{"".join(views_rows[:30])}</table></div>' if views_rows
+            else '<p class="empty">最近 60 天沒有大神談總經。</p>')
+    body = (f'<h1>總經儀表板</h1><p class="sub">資料來自聖路易聯準銀行 FRED（免費公開）。圖表為近 3 年，'
+            f'滑過圖表可看每個時間點的數值。</p><h2>總經訊號</h2>{sig_html}<h2>關鍵指標</h2>{grid}'
+            f'<h2>大神怎麼看總經（近 60 天）</h2>{guru}')
+    return _page("總經 · Smartmoney Radar", body, "", "macro.html")
+
+
 def render_weekly(store: Store) -> str:
     from .weekly import markdown_to_html
     reps = store.reports()
@@ -845,6 +929,8 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     (out / "insiders.html").write_text(render_insiders(store), encoding="utf-8")
     (out / "retail.html").write_text(render_retail(store, names), encoding="utf-8")
     (out / "weekly.html").write_text(render_weekly(store), encoding="utf-8")
+    (out / "buzz.html").write_text(render_buzz(store, investors, names), encoding="utf-8")
+    (out / "macro.html").write_text(render_macro(store, names), encoding="utf-8")
     (out / "activist.html").write_text(render_activist(store, names), encoding="utf-8")
     (out / "clone.html").write_text(render_clone(clones, names, prices is not None), encoding="utf-8")
     clone_by = {r.investor: r for r in clones}

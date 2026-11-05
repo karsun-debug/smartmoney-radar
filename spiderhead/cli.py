@@ -140,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="skip Form 4 / 13D / congress trade collection")
     f.add_argument("--no-retail", action="store_true", help="skip Reddit retail chatter")
     f.add_argument("--no-shorts", action="store_true", help="skip FINRA short-sale volume")
+    f.add_argument("--no-buzz", action="store_true", help="skip Wikipedia pageviews")
+    f.add_argument("--no-macro", action="store_true", help="skip FRED macro series")
 
     im = sub.add_parser("import", help="匯入手動整理的貼文 JSON/JSONL")
     im.add_argument("posts_file")
@@ -289,6 +291,20 @@ def _store_commands(args, investors) -> int:
         if args.cmd == "fetch" and not args.no_trades:
             trades = _collect_trades(investors, max(args.days, 30), store)
             print(f"對帳單：抓到 {len(trades)} 筆，新增 {store.add_trades(trades)} 筆")
+        if args.cmd == "fetch" and not args.no_macro:
+            from .health import HealthLog
+            from .macro import fetch_macro
+            from .sources import _requests_get
+            hl = HealthLog()
+            fetch_macro(store, _requests_get, health=hl)
+            store.log_results(hl.results)
+        if args.cmd == "fetch" and not args.no_buzz:
+            from .buzz import fetch_pageviews
+            from .health import HealthLog
+            from .sources import _requests_get
+            hl = HealthLog()
+            fetch_pageviews(store, _requests_get, investors, health=hl)
+            store.log_results(hl.results)
         if args.cmd == "fetch" and not args.no_shorts:
             from .health import HealthLog
             from .retail import known_tickers

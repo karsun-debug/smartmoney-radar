@@ -61,6 +61,12 @@ CREATE TABLE IF NOT EXISTS short_volume (
     PRIMARY KEY (ticker, day)
 );
 CREATE TABLE IF NOT EXISTS short_days (day TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS pageviews (
+    investor TEXT NOT NULL, day TEXT NOT NULL, views INTEGER NOT NULL, PRIMARY KEY (investor, day)
+);
+CREATE TABLE IF NOT EXISTS macro (
+    series TEXT NOT NULL, day TEXT NOT NULL, value REAL NOT NULL, PRIMARY KEY (series, day)
+);
 CREATE TABLE IF NOT EXISTS prices (
     ticker TEXT NOT NULL, day TEXT NOT NULL, close REAL NOT NULL, PRIMARY KEY (ticker, day)
 );
@@ -281,6 +287,27 @@ class Store:
     def mark_short_day(self, day: date) -> None:
         self.db.execute("INSERT OR IGNORE INTO short_days VALUES (?)", (day.isoformat(),))
         self.db.commit()
+
+    # ------------------------------------------------------------- buzz
+    def add_pageviews(self, investor: str, rows) -> None:
+        self.db.executemany("INSERT OR REPLACE INTO pageviews VALUES (?,?,?)",
+                            [(investor, d.isoformat(), v) for d, v in rows])
+        self.db.commit()
+
+    def pageviews(self, investor: str, since: date) -> list[tuple[date, int]]:
+        return [(date.fromisoformat(d), v) for d, v in self.db.execute(
+            "SELECT day, views FROM pageviews WHERE investor = ? AND day >= ? ORDER BY day",
+            (investor, since.isoformat()))]
+
+    # ------------------------------------------------------------- macro
+    def add_macro(self, series: str, rows) -> None:
+        self.db.executemany("INSERT OR REPLACE INTO macro VALUES (?,?,?)",
+                            [(series, d.isoformat(), v) for d, v in rows])
+        self.db.commit()
+
+    def macro(self, series: str, since: date) -> list[tuple[date, float]]:
+        return [(date.fromisoformat(d), v) for d, v in self.db.execute(
+            "SELECT day, value FROM macro WHERE series = ? AND day >= ? ORDER BY day", (series, since.isoformat()))]
 
     # ------------------------------------------------------------- ARK
     def save_ark(self, fund: str, day: date, rows) -> None:

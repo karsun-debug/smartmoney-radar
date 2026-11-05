@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 FAMILY_NAMES = {
     "x": "X 貼文", "rss": "RSS", "news": "大神新聞", "industry": "產業新聞",
     "sec": "SEC 申報（Form 4 / 13D / 8-K）", "sec13f": "SEC 13F 季報", "house": "眾議院申報", "congress": "國會交易（LuxAlgo）",
-    "ark": "ARK 每日持股", "prices": "股價", "insiders": "全市場內部人買進（Form 4）", "retail": "散戶論壇（Reddit）", "shorts": "放空成交量（FINRA）",
+    "ark": "ARK 每日持股", "prices": "股價", "insiders": "全市場內部人買進（Form 4）", "retail": "散戶論壇（Reddit）", "shorts": "放空成交量（FINRA）", "buzz": "維基百科瀏覽量", "macro": "總經數據（FRED）",
 }
 
 

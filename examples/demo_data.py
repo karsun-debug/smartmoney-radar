@@ -94,6 +94,23 @@ def main(days: int = 90, seed: int = 7) -> None:
                    date(today.year, 8, 14))
     store.save_13f("buffett", q3, "demo-q3", parse_infotable((fix / "curr_q.xml").read_bytes()), tick,
                    min(today, date(today.year, 11, 3)))
+    # Synthetic macro series (shape only; real data comes from FRED).
+    from spiderhead.macro import SERIES
+    base = {"SP500": 5000, "VIXCLS": 16, "DGS10": 4.2, "DGS2": 4.0, "T10Y2Y": 0.2, "DFF": 4.3,
+            "CPIAUCSL": 310, "PCEPILFE": 120, "UNRATE": 4.1, "ICSA": 220000, "BAMLH0A0HYM2": 3.2,
+            "DTWEXBGS": 120, "DCOILWTICO": 75, "MORTGAGE30US": 6.5, "M2SL": 21000}
+    for s in SERIES:
+        v, rows = base[s.sid], []
+        monthly = s.sid in ("CPIAUCSL", "PCEPILFE", "UNRATE", "M2SL")
+        step = 30 if monthly else (7 if s.sid in ("ICSA", "MORTGAGE30US") else 1)
+        for d in range(365 * 4, -1, -step):
+            if s.yoy:
+                v *= 1 + rnd.gauss(0.0025, 0.001)
+            else:
+                v = max(0.01, v * (1 + rnd.gauss(0.0002, 0.01))) if v > 50 else v + rnd.gauss(0, 0.03)
+            rows.append((today - timedelta(days=d), round(v, 4)))
+        store.add_macro(s.sid, rows)
+
     print(f"demo posts: {len(posts)}, trades: {len(trades)}")
 
 
