@@ -20,3 +20,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["spiderhead"]
+
+[tool.setuptools.package-data]
+spiderhead = ["static/*.png"]

@@ -47,7 +47,30 @@ CSS = """
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",
 "PingFang TC","Noto Sans TC",sans-serif}
-main{max-width:1120px;margin:0 auto;padding:24px 16px 64px}
+main{max-width:1120px;margin:0 auto;padding:24px 16px 64px;
+padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right));
+padding-top:max(24px,env(safe-area-inset-top))}
+.tabbar{display:none}
+.offline{display:none;position:sticky;top:0;z-index:30;background:var(--chip);color:var(--ink);font-size:13px;
+padding:6px 12px;border-radius:8px;margin-bottom:8px}
+.more-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.more-grid a{display:block;padding:14px;border-radius:12px;background:var(--surface);border:1px solid var(--border);
+color:var(--ink);text-decoration:none;font-weight:600;min-height:44px}
+.more-grid a span{display:block;font-weight:400;font-size:12px;color:var(--ink-2);margin-top:2px}
+@media (max-width:760px){
+ nav.top a:not(.brand){display:none}
+ nav.top input{max-width:none}
+ main{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+ .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--surface);
+  border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom)}
+ .tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 0 5px;min-height:50px;
+  font-size:11px;color:var(--muted);text-decoration:none;-webkit-tap-highlight-color:transparent}
+ .tabbar a.on{color:var(--series)}
+ .tabbar svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+ h1{font-size:22px}
+ .tiles{grid-template-columns:1fr 1fr}
+ .tile .v{font-size:21px}
+}
 a{color:var(--series)}
 header.top{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;justify-content:space-between}
 h1{font-size:26px;margin:0}h2{font-size:18px;margin:36px 0 12px}h3{font-size:15px;margin:0}
@@ -117,6 +140,9 @@ document.querySelectorAll('[data-tip]').forEach(el=>{
 """
 
 
+from .pwa import REGISTER_JS  # noqa: E402
+
+
 def safe_url(url: str | None) -> str | None:
     """Only http(s) links from feeds become clickable (blocks javascript:/data: URLs)."""
     if url and url.strip().lower().startswith(("http://", "https://")):
@@ -154,13 +180,41 @@ q.addEventListener('change',go);q.addEventListener('keydown',e=>{if(e.key==='Ent
 """
 
 
+TAB_ICONS = {
+    "home": '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
+    "macro": '<path d="M3 20h18"/><path d="M4 16l5-6 4 3 7-8"/>',
+    "bank": '<path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 20h18"/>',
+    "earnings": '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 15v2M12 11v6M16 7v10"/>',
+    "more": '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+}
+TABS = [("index.html", "總覽", "home"), ("macro.html", "總經", "macro"), ("banks.html", "投行", "bank"),
+        ("earnings.html", "財報", "earnings"), ("more.html", "更多", "more")]
+
+
+def _tabbar(root: str, active: str) -> str:
+    on = active if active in {t[0] for t in TABS[:-1]} else "more.html"
+    return '<nav class="tabbar" aria-label="主要分頁">' + "".join(
+        f'<a href="{root}{href}"{" class=on aria-current=page" if href == on else ""}>'
+        f'<svg viewBox="0 0 24 24" aria-hidden="true">{TAB_ICONS[icon]}</svg>{esc(label)}</a>'
+        for href, label, icon in TABS) + '</nav>'
+
+
 def _page(title: str, body: str, root: str, active: str = "") -> str:
     return (f'<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
-            f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
+            f'<link rel="manifest" href="{root}manifest.webmanifest">'
+            f'<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">'
+            f'<meta name="apple-mobile-web-app-status-bar-style" content="default">'
+            f'<meta name="apple-mobile-web-app-title" content="大神雷達">'
+            f'<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">'
+            f'<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">'
+            f'<link rel="apple-touch-icon" href="{root}assets/icons/apple-touch-icon.png">'
+            f'<link rel="icon" type="image/png" href="{root}assets/icons/favicon-32.png">'
             f'<title>{esc(title)}</title><link rel="stylesheet" href="{root}assets/style.css"></head>'
-            f'<body><main>{_nav(root, active)}{body}<footer>Smartmoney Radar · 資料來自公開貼文、新聞與 SEC 申報 · '
+            f'<body><main><div class="offline" id="sh-offline">目前離線，顯示的是上次更新的資料</div>'
+            f'{_nav(root, active)}{body}<footer>Smartmoney Radar · 資料來自公開貼文、新聞與 SEC 申報 · '
             f'僅供研究參考，不構成投資建議 · 產生於 {datetime.now():%Y-%m-%d %H:%M}</footer></main>'
-            f'<script src="{root}assets/app.js"></script></body></html>')
+            f'{_tabbar(root, active)}<script src="{root}assets/app.js"></script></body></html>')
 
 
 def _badge(stance: str, text: str | None = None) -> str:
@@ -882,6 +936,27 @@ def _ticker_banks(store: Store, ticker: str) -> str:
             f'<tr><th>日期</th><th>投行</th><th>動作</th><th>評等</th><th class="num">目標價</th></tr>{trs}</table></div>')
 
 
+def render_more() -> str:
+    """Phone menu: every page as a big button, plus how to install and get notifications."""
+    desc = {"index.html": "大神動態、產業熱度、評分卡", "macro.html": "利率、通膨、就業、VIX",
+            "earnings.html": "營收、獲利、毛利率", "banks.html": "投行評等準不準、有沒有出貨",
+            "consensus.html": "最多大神持有的股票", "clone.html": "照抄 13F 能不能贏大盤",
+            "insiders.html": "多位內部人同時買進", "activist.html": "13D / 13G 大額持股",
+            "retail.html": "散戶熱門股 vs 大神看法", "buzz.html": "誰最受關注", "weekly.html": "每週重點整理"}
+    tiles = "".join(f'<a href="{href}">{esc(label)}<span>{esc(desc.get(href, ""))}</span></a>' for href, label in NAV)
+    tiles += '<a href="data/index.json">開放資料<span>JSON / CSV / RSS</span></a>'
+    guide = (
+        '<h2>加到 iPhone 主畫面（像 App 一樣用）</h2><ol>'
+        '<li>用 <strong>Safari</strong> 打開這個網站（其他瀏覽器在 iPhone 上不能安裝）。</li>'
+        '<li>點下方的<strong>分享</strong>按鈕（方框加向上箭頭）。</li>'
+        '<li>往下滑，點<strong>加入主畫面</strong>，再點<strong>新增</strong>。</li>'
+        '<li>之後從主畫面的「大神雷達」圖示開啟：全螢幕、底部分頁列，沒網路時也能看上次的資料。</li></ol>'
+        '<h2>手機收通知</h2><p>每天早上會推送圖卡＋文字摘要，有新交易或群買時即時通知。'
+        '推播走 <strong>Telegram</strong> 或 <strong>LINE</strong>（都免費），設定方式見 repo 的 docs/SETUP.md。</p>')
+    body = f'<h1>更多</h1><div class="more-grid">{tiles}</div>{guide}'
+    return _page("更多 · Smartmoney Radar", body, "", "more.html")
+
+
 def render_weekly(store: Store) -> str:
     from .weekly import markdown_to_html
     reps = store.reports()
@@ -1172,6 +1247,10 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     (out / "macro.html").write_text(render_macro(store, names), encoding="utf-8")
     (out / "banks.html").write_text(render_banks(store, names, prices), encoding="utf-8")
     (out / "earnings.html").write_text(render_earnings(store), encoding="utf-8")
+    (out / "more.html").write_text(render_more(), encoding="utf-8")
+    from .pwa import write_pwa
+    write_pwa(out, ["index.html", "more.html", "macro.html", "earnings.html", "banks.html", "consensus.html",
+                    "weekly.html"])
     (out / "activist.html").write_text(render_activist(store, names), encoding="utf-8")
     (out / "clone.html").write_text(render_clone(clones, names, prices is not None), encoding="utf-8")
     clone_by = {r.investor: r for r in clones}
@@ -1197,5 +1276,6 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     index = [[f"{t}", f"ticker/{_slug(t)}.html"] for t in sorted(tickers)]
     index += [[f"{inv.name}（{inv.fund}）", f"investor/{inv.key}.html"] for inv in investors.values()]
     (out / "assets" / "app.js").write_text(
-        JS + "\nwindow.SH_INDEX=" + json.dumps(index, ensure_ascii=False) + ";\n" + SEARCH_JS, encoding="utf-8")
+        JS + "\nwindow.SH_INDEX=" + json.dumps(index, ensure_ascii=False) + ";\n" + SEARCH_JS + REGISTER_JS,
+        encoding="utf-8")
     return out / "index.html"
