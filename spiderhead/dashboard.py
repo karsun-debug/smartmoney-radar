@@ -492,6 +492,30 @@ def render_retail(store: Store, names: dict[str, str], days: int = 7) -> str:
     return _page("散戶 vs 大神 · Smartmoney Radar", f"<h1>散戶 vs 大神</h1>{note}{table}", "", "retail.html")
 
 
+def reportcard_table(cards, names: dict[str, str], root: str = "") -> str:
+    rows = sorted(cards.values(), key=lambda c: -(c.score if c.score is not None else -1))
+    rows = [c for c in rows if c.parts or c.consistent + c.contradicts or c.calls_scored]
+    if not rows:
+        return '<p class="empty">資料還不夠，累積幾週的發言、申報與股價後才會出現。</p>'
+
+    def part(c, key, detail):
+        v = c.parts.get(key)
+        return f'<td class="num">{"—" if v is None else f"{v:.0f}"}<div class="sub">{detail}</div></td>'
+    trs = "".join(
+        f'<tr><td><a href="{root}investor/{esc(c.investor)}.html">{esc(names.get(c.investor, c.investor))}</a></td>'
+        f'<td class="num"><strong>{c.grade}</strong><div class="sub">'
+        f'{"—" if c.score is None else f"{c.score:.0f} 分"}</div></td>'
+        + part(c, "說到做到", f"{c.consistent} 對 / {c.contradicts} 不一")
+        + part(c, "喊單準確", f"{c.calls_scored} 次·{c.call_horizon or '—'} 天")
+        + part(c, "跟單價值", f"{_pct(c.clone_excess)} vs SPY")
+        + "</tr>" for c in rows)
+    return ('<div class="tablewrap"><table><tr><th>大神</th><th class="num">評等</th>'
+            '<th class="num">說到做到</th><th class="num">喊單準確</th><th class="num">跟單價值</th></tr>'
+            + trs + '</table></div><p class="sub">各項 0–100 分；資料少於 3 筆的項目不計入。'
+            '說到做到＝公開看法與申報交易（或 13F 變化）同方向的比例；喊單準確＝看多後上漲、看空後下跌的比例；'
+            '跟單價值＝照 13F 公布日跟買的報酬超過 SPY 的幅度（±20 個百分點對應 100／0 分）。</p>')
+
+
 def render_weekly(store: Store) -> str:
     from .weekly import markdown_to_html
     reps = store.reports()
@@ -575,7 +599,7 @@ def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
 
 
 def render_index(store: Store, investors: dict[str, Investor], days: int, step: int,
-                 recent_days: int = 7, calls: list[CallResult] | None = None) -> str:
+                 recent_days: int = 7, calls: list[CallResult] | None = None, report_cards=None) -> str:
     start, end = window(days)
     buckets, series = sector_series(store.signals_between(start, end), start, end, step)
     labels = _labels(buckets, step, end)
@@ -643,6 +667,7 @@ def render_index(store: Store, investors: dict[str, Investor], days: int, step: 
             f'<h2>多位大神同時在談（近 {recent_days} 天）</h2>{cons}'
             f'<h2>最新對帳單（近 30 天申報的實際交易）</h2>'
             f'{trades_table(store.trades_between(end - timedelta(days=29), end, by="filed"), names, "", limit=20)}'
+            f'<h2>大神評分卡</h2>{reportcard_table(report_cards or {}, names)}'
             f'<h2>喊單勝率排行</h2>{scoreboard_table(calls or [], names)}'
             f'<h2>大神</h2><div class="grid">{"".join(inv_cards)}</div>'
             f'<h2>最新動態</h2>{_feed_html(recent.feed, names, "")}'
@@ -652,7 +677,7 @@ def render_index(store: Store, investors: dict[str, Investor], days: int, step: 
 
 def render_investor(store: Store, inv: Investor, names: dict[str, str], days: int, step: int,
                     holdings: tuple[str, list[PositionChange], list[ConsistencyItem]] | None = None,
-                    calls: list[CallResult] | None = None, clone=None) -> str:
+                    calls: list[CallResult] | None = None, clone=None, card=None) -> str:
     start, end = window(days)
     prof = investor_profile(store, inv, start, end, step)
     buckets, activity = prof.activity
@@ -728,7 +753,9 @@ def render_investor(store: Store, inv: Investor, names: dict[str, str], days: in
             f'<div class="tiles"><div class="tile"><div class="v">{len(prof.posts)}</div><div class="l">{days} 天發文 / 報導</div></div>'
             f'<div class="tile"><div class="v">{own}</div><div class="l">本人發言</div></div>'
             f'<div class="tile"><div class="v">{len(prof.tickers)}</div><div class="l">提到的個股</div></div>'
-            f'<div class="tile"><div class="v">{esc(PROOF.get(inv.proof, inv.proof))}</div><div class="l">對帳單</div></div></div>'
+            f'<div class="tile"><div class="v">{esc(PROOF.get(inv.proof, inv.proof))}</div><div class="l">對帳單</div></div>'
+            f'<div class="tile"><div class="v">{card.grade if card else "—"}</div><div class="l">評分卡'
+            f'{"（" + f"{card.score:.0f} 分" + "）" if card and card.score is not None else ""}</div></div></div>'
             f'<h2>發文頻率</h2><div class="card">{bar_chart(_labels(buckets, step, end), activity)}</div>'
             f'<h2>最常談的產業</h2><div class="card">{sec_html}</div>'
             f'<h2>提到的個股</h2>{tick_html}'
@@ -757,7 +784,11 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     start, end = window(days)
     # Score calls over a longer look-back so 90-day outcomes exist.
     calls = score_calls(store.signals_between(start - timedelta(days=270), end), prices) if prices else []
-    (out / "index.html").write_text(render_index(store, investors, days, step, calls=calls),
+    from .clone import backtest_all
+    from .reportcard import build_cards
+    clones = backtest_all(store, investors, prices) if prices is not None else []
+    cards = build_cards(store, investors, calls, clones)
+    (out / "index.html").write_text(render_index(store, investors, days, step, calls=calls, report_cards=cards),
                                     encoding="utf-8")
     from .consensus13f import build_consensus
     consensus = build_consensus(store, investors)
@@ -765,13 +796,11 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     (out / "insiders.html").write_text(render_insiders(store), encoding="utf-8")
     (out / "retail.html").write_text(render_retail(store, names), encoding="utf-8")
     (out / "weekly.html").write_text(render_weekly(store), encoding="utf-8")
-    from .clone import backtest_all
-    clones = backtest_all(store, investors, prices) if prices is not None else []
     (out / "clone.html").write_text(render_clone(clones, names, prices is not None), encoding="utf-8")
     clone_by = {r.investor: r for r in clones}
     for inv in investors.values():
         page = render_investor(store, inv, names, days, step, (holdings or {}).get(inv.key), calls,
-                               clone_by.get(inv.key))
+                               clone_by.get(inv.key), cards.get(inv.key))
         (out / "investor" / f"{inv.key}.html").write_text(page, encoding="utf-8")
     tickers = {s.ticker for s in store.signals_between(start, end)
                if not s.ticker.startswith(("SECTOR:", "MACRO:"))}
