@@ -139,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--no-trades", action="store_true",
                    help="skip Form 4 / 13D / congress trade collection")
     f.add_argument("--no-retail", action="store_true", help="skip Reddit retail chatter")
+    f.add_argument("--no-shorts", action="store_true", help="skip FINRA short-sale volume")
 
     im = sub.add_parser("import", help="匯入手動整理的貼文 JSON/JSONL")
     im.add_argument("posts_file")
@@ -288,6 +289,16 @@ def _store_commands(args, investors) -> int:
         if args.cmd == "fetch" and not args.no_trades:
             trades = _collect_trades(investors, max(args.days, 30), store)
             print(f"對帳單：抓到 {len(trades)} 筆，新增 {store.add_trades(trades)} 筆")
+        if args.cmd == "fetch" and not args.no_shorts:
+            from .health import HealthLog
+            from .retail import known_tickers
+            from .shorts import fetch_shorts
+            from .sources import _requests_get
+            from .store import window
+            hl = HealthLog()
+            n = fetch_shorts(store, _requests_get, known_tickers(store, *window(180)), health=hl)
+            store.log_results(hl.results)
+            print(f"放空成交量：{n} 筆")
         return 0
 
     if args.cmd == "weekly":

@@ -56,6 +56,11 @@ CREATE TABLE IF NOT EXISTS reports (
     period_end TEXT PRIMARY KEY, period_start TEXT NOT NULL, text TEXT NOT NULL,
     author TEXT NOT NULL, created TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS short_volume (
+    ticker TEXT NOT NULL, day TEXT NOT NULL, short REAL NOT NULL, total REAL NOT NULL,
+    PRIMARY KEY (ticker, day)
+);
+CREATE TABLE IF NOT EXISTS short_days (day TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS prices (
     ticker TEXT NOT NULL, day TEXT NOT NULL, close REAL NOT NULL, PRIMARY KEY (ticker, day)
 );
@@ -257,6 +262,25 @@ class Store:
         return [(date.fromisoformat(r[1]), date.fromisoformat(r[0]), r[2], r[3]) for r in self.db.execute(
             "SELECT period_end, period_start, text, author FROM reports ORDER BY period_end DESC LIMIT ?",
             (limit,))]
+
+    # ------------------------------------------------------------- short volume
+    def add_short_volume(self, rows) -> None:
+        """rows: (day, ticker, short, total). FINRA splits by venue file; we keep the consolidated one."""
+        self.db.executemany("INSERT OR REPLACE INTO short_volume VALUES (?,?,?,?)",
+                            [(t, d.isoformat(), s, tot) for d, t, s, tot in rows])
+        self.db.commit()
+
+    def short_volume(self, ticker: str, since: date) -> list[tuple[date, float, float]]:
+        return [(date.fromisoformat(d), s, t) for d, s, t in self.db.execute(
+            "SELECT day, short, total FROM short_volume WHERE ticker = ? AND day >= ? ORDER BY day",
+            (ticker.upper(), since.isoformat()))]
+
+    def short_day_done(self, day: date) -> bool:
+        return self.db.execute("SELECT 1 FROM short_days WHERE day = ?", (day.isoformat(),)).fetchone() is not None
+
+    def mark_short_day(self, day: date) -> None:
+        self.db.execute("INSERT OR IGNORE INTO short_days VALUES (?)", (day.isoformat(),))
+        self.db.commit()
 
     # ------------------------------------------------------------- ARK
     def save_ark(self, fund: str, day: date, rows) -> None:

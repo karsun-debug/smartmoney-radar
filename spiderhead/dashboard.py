@@ -398,6 +398,19 @@ def _who(keys, names: dict[str, str], extra: dict[str, str] | None = None) -> st
         for k in sorted(keys, key=lambda k: names.get(k, k)))
 
 
+def _ticker_shorts(store: Store, ticker: str) -> str:
+    from .shorts import short_ratio
+    got = short_ratio(store, ticker, days=10)
+    if not got:
+        return ""
+    avg, rows = got
+    trs = "".join(f'<tr><td>{d}</td><td class="num">{s / t * 100:.1f}%</td><td class="num">{t:,.0f}</td></tr>'
+                  for d, s, t in reversed(rows))
+    return (f'<h2>放空成交量比例（FINRA）</h2><p class="sub">最近 {len(rows)} 個交易日平均 {avg * 100:.1f}%。'
+            f'包含造市商避險，請看趨勢而非單日數字。</p><div class="tablewrap"><table><tr><th>日期</th>'
+            f'<th class="num">放空占比</th><th class="num">總成交量</th></tr>{trs}</table></div>')
+
+
 def _ticker_13f(consensus, ticker: str, names: dict[str, str]) -> str:
     row = consensus.rows.get(ticker) if consensus else None
     if not row or not (row.owners or row.sold):
@@ -483,12 +496,18 @@ def render_retail(store: Store, names: dict[str, str], days: int = 7) -> str:
         return _page("散戶 vs 大神 · Smartmoney Radar",
                      f'<h1>散戶 vs 大神</h1>{note}<p class="empty">還沒有散戶資料，執行 <code>spiderhead fetch</code>。</p>',
                      "", "retail.html")
+    from .shorts import short_ratio
+
+    def sr(t: str) -> str:
+        got = short_ratio(store, t)
+        return "—" if not got else f"{got[0] * 100:.0f}%"
     trs = "".join(
         f'<tr><td>{_tick(r.ticker, "")}</td><td class="num">{r.mentions}</td><td>{_mood(r.retail_mood)}</td>'
+        f'<td class="num">{sr(r.ticker)}</td>'
         f'<td class="wrap">{" ".join(_badge(v, names.get(k, k)) for k, v in sorted(r.guru_views.items())) or "—"}</td>'
         f'<td>{_badge("bearish", "看法相反") if r.divergent else ""}</td></tr>' for r in rows)
     table = ('<div class="tablewrap"><table><tr><th>標的</th><th class="num">散戶討論數</th><th>散戶情緒</th>'
-             '<th>大神看法</th><th></th></tr>' + trs + '</table></div>')
+             '<th class="num">放空占比（5 日）</th><th>大神看法</th><th></th></tr>' + trs + '</table></div>')
     return _page("散戶 vs 大神 · Smartmoney Radar", f"<h1>散戶 vs 大神</h1>{note}{table}", "", "retail.html")
 
 
@@ -594,7 +613,8 @@ def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
             f'<span class="sub">{days} 天內被提到 {len(rows)} 次 · ▲ {bulls} / ▼ {bears}</span></header>'
             f'{chart}<h2>誰在談</h2>{talk}<h2>大神的實際交易（對帳單）</h2>'
             f'{trades_table(trades, names, "../")}'
-            f'{_ticker_13f(consensus, ticker, names)}')
+            f'{_ticker_13f(consensus, ticker, names)}'
+            f'{_ticker_shorts(store, ticker)}')
     return _page(f"{ticker} · Smartmoney Radar", body, "../")
 
 
