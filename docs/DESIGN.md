@@ -56,17 +56,25 @@ EDGAR 規範：User-Agent 必須帶聯絡資訊、每秒 ≤ 10 次請求。
 
 | 模組 | 職責 |
 |---|---|
-| `watchlist.py` | 追蹤名單（Buffett、Ackman、Burry、Druckenmiller、Dalio、Tepper、Klarman、Icahn），可用 JSON 擴充 |
-| `edgar.py` | EDGAR API：列出申報、下載 13F 資訊表 XML、取得公司名→代號對照表 |
-| `holdings.py` | 解析 13F XML（合併同 CUSIP 的拆分列）、季對季比較 NEW/ADD/TRIM/EXIT/HOLD、CUSIP→代號 |
-| `posts.py` | 匯入貼文（JSON/JSONL、RSS/Atom）；`KeywordAnalyzer`（離線）與 `ClaudeAnalyzer`（AI） |
-| `sources.py` | 自動抓取：X API v2、RSS/Atom、Google News（每位大神 + 每個產業）；單一來源失敗不影響其他 |
-| `store.py` | SQLite（`data/spiderhead.db`）：貼文去重、記錄已分析、查詢時間區間 |
+| `watchlist.py` | 追蹤名單（聲量高＋可對帳：Ackman、Wood、Burry、Buffett、Druckenmiller、Tepper、Dalio、Loeb、Saylor、Pelosi），可用 JSON 擴充或移除 |
+| `sources.py` | 自動抓取貼文：X API v2、RSS/Atom、Google News（每位大神 + 每個產業）；單一來源失敗不影響其他 |
+| `posts.py` | 貼文匯入與分析：`KeywordAnalyzer`（離線，含「引述本人」判斷）、`ClaudeAnalyzer`（結構化輸出）、`HybridAnalyzer`（先關鍵字、必要時才用 Claude，有預算上限） |
 | `sectors.py` | 產業分類（AI/半導體、金融、能源、總經…），關鍵字與代號對照 |
+| `edgar.py` | EDGAR API：列出申報、下載 13F 資訊表 / Form 4 / 8-K / 申報表頭、公司名→代號對照表 |
+| `holdings.py` | 解析 13F XML（合併拆分列）、季對季比較、各季摘要、CUSIP→代號（SEC 名稱對照 + OpenFIGI 備援） |
+| `trades.py` | 即時對帳單：Form 4、13D/G、Strategy 8-K 比特幣購買、國會交易（LuxAlgo 備援與參議員） |
+| `house.py` | 眾議院書記處：年度索引 ZIP → PTR PDF → 依文字座標切欄解析表格 |
+| `ark.py` | ARK 每日持股檔比對，扣除 ETF 申購贖回後得出每日買賣 |
+| `store.py` | SQLite：貼文、觀點、交易、13F 歷史、ARK 持股快照、股價、通知紀錄、資料來源紀錄；舊資料庫自動升級欄位 |
 | `trends.py` | 產業熱度（含與上一期比較）、多位大神共識標的 |
-| `consistency.py` | 把觀點與同季持倉變化配對，判定一致/矛盾/未動/查無；Put 選擇權視為反向 |
-| `report.py` | 輸出中文 Markdown 報告 |
-| `cli.py` | `spiderhead list / holdings / posts / report` |
+| `consistency.py` | 言行比對：觀點 vs 13F 季度變化、觀點 vs 申報交易（前 30 天到後 90 天） |
+| `performance.py` | 喊單勝率：Stooq 日線股價、30/90 天報酬、7 天內重複報導只算一次 |
+| `digest.py` | 每日摘要資料（動態、產業熱度、共識、對帳單、來源狀態）與大神個人資料 |
+| `notify.py` / `alerts.py` | LINE Messaging API 推播：每日摘要、即時通知（每則只送一次，首次執行只記錄） |
+| `dashboard.py` | 靜態網頁儀表板（總覽、每位大神、每檔個股；內嵌 SVG 圖表、深色模式） |
+| `health.py` / `doctor.py` | 資料來源成功/失敗紀錄與 `spiderhead doctor` 設定檢查 |
+| `report.py` | Markdown 報告 |
+| `cli.py` | `spiderhead fetch / alert / push-line / dashboard / digest / feed / trends / doctor / verify-ciks / holdings / report …` |
 
 ## 4. 分析邏輯
 
