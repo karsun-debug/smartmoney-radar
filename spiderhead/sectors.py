@@ -51,7 +51,7 @@ TICKER_SECTOR: dict[str, str] = {
     "BRK.B": "financials", "OXY": "energy", "CVX": "energy", "XOM": "energy",
     "UNH": "healthcare", "LLY": "healthcare", "NVO": "healthcare", "BA": "industrials",
     "UNP": "industrials", "BABA": "internet", "JD": "internet", "PDD": "internet",
-    "TSLA": "consumer", "UBER": "internet", "NFLX": "internet", "GLD": "macro", "SPY": "macro", "TLT": "macro", "MSTR": "crypto", "COIN": "crypto",
+    "TSLA": "consumer", "UBER": "internet", "NFLX": "internet", "GLD": "macro", "SPY": "macro", "TLT": "macro", "MSTR": "crypto", "COIN": "crypto", "BTC": "crypto", "ETH": "crypto",
 }
 
 _PATTERNS = {s: re.compile(r"\b(" + "|".join(re.escape(k) for k in kws) + r")(?:s|es)?\b", re.I)

@@ -40,7 +40,7 @@ DEFAULT_WATCHLIST: list[Investor] = [
              {}, "13F", "以公開信施壓公司聞名的維權投資人，季信觀點與 13F 可互相對照。"),
     Investor("saylor", "Michael Saylor", "Strategy Inc (MicroStrategy)", "0001050446",
              {"x": "saylor"}, "8-K",
-             "幾乎每週在 X 預告買比特幣，並以 8-K 申報實際買入量；8-K 自動比對尚未實作。"),
+             "幾乎每週在 X 預告買比特幣，隔天以 8-K 申報實際買入量與均價，系統會自動解析。"),
     Investor("pelosi", "Nancy Pelosi", "美國眾議員（前議長）", "",
              {"congress": "Pelosi"}, "STOCK Act",
              "網路上被追蹤最多的「國會交易」，多為配偶 Paul Pelosi 的交易；依 STOCK Act 須在 45 天內申報。"

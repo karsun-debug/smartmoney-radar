@@ -168,13 +168,16 @@ class TradeCollector:
 
     def _sec(self, inv: Investor, since: date) -> list[Trade]:
         out: list[Trade] = []
-        for f in self.edgar.list_filings(inv.cik, FORMS_4 + FORMS_13DG, limit=40):
+        forms = FORMS_4 + FORMS_13DG + (("8-K",) if inv.proof == "8-K" else ())
+        for f in self.edgar.list_filings(inv.cik, forms, limit=40):
             if f.filing_date < since:
                 continue
             url = self.edgar.filing_index_url(f)
             if f.form in FORMS_4:
                 xml = self.edgar.fetch_primary_xml(f)
                 out += parse_form4(xml, inv.key, f.filing_date, url)
+            elif f.form == "8-K":
+                out += parse_btc_8k(self.edgar.fetch_primary_xml(f), inv.key, f.filing_date, url)
             else:
                 issuer = parse_subject_company(self.edgar.fetch_header(f)) or "?"
                 out.append(Trade(inv.key, f.filing_date, f.filing_date, "stake", f.form,
@@ -188,3 +191,69 @@ class TradeCollector:
             raw = self.get(f"{CONGRESS_DATA}/snapshot-{y}.json.gz", {})
             rows += json.loads(gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw)
         return parse_congress_rows(rows, members, since)
+
+
+# ------------------------------------------------------------------ 8-K (Strategy BTC)
+
+_TAGS = re.compile(r"<[^>]+>")
+_PROSE = re.compile(
+    r"acquired\s+(?:approximately\s+|an\s+aggregate\s+of\s+)?([\d,]+)\s+(?:bitcoins?|BTC)\s+for\s+"
+    r"(?:approximately\s+|an\s+aggregate\s+purchase\s+price\s+of\s+approximately\s+)?\$\s?([\d.,]+)\s*(million|billion)"
+    r"(?:.{0,200}?average\s+(?:purchase\s+)?price\s+of\s+(?:approximately\s+)?\$\s?([\d,]+(?:\.\d+)?))?",
+    re.I | re.S)
+_HOLDINGS = re.compile(r"(?:held|holds)\s+(?:an\s+aggregate\s+of\s+)?(?:approximately\s+)?([\d,]+)\s+(?:bitcoins?|BTC)",
+                       re.I)
+_NUM = re.compile(r"\$?\s?([\d][\d,]*(?:\.\d+)?)")
+
+
+def _f(v: str) -> float:
+    return float(v.replace(",", ""))
+
+
+def html_text(html: str | bytes) -> str:
+    if isinstance(html, bytes):
+        html = html.decode("utf-8", "replace")
+    import html as _html
+    return " ".join(_html.unescape(_TAGS.sub(" ", html)).split())
+
+
+def parse_btc_8k(html: str | bytes, investor_key: str, filed: date, url: str | None = None) -> list[Trade]:
+    """Bitcoin purchases announced in a Strategy (MicroStrategy) 8-K.
+
+    Handles the prose form ("acquired 397 bitcoins for approximately $45.6
+    million ... average price of approximately $114,771 per bitcoin") and the
+    table form (header "BTC Acquired | Aggregate Purchase Price (in millions) |
+    Average Purchase Price | Aggregate BTC Holdings ...").
+    """
+    text = html_text(html)
+    btc = avg = total = holdings = None
+    m = _PROSE.search(text)
+    if m:
+        btc = _f(m.group(1))
+        total = _f(m.group(2)) * (1e9 if m.group(3).lower() == "billion" else 1e6)
+        avg = _f(m.group(4)) if m.group(4) else (total / btc if btc else None)
+        h = _HOLDINGS.search(text, m.end())
+        holdings = _f(h.group(1)) if h else None
+    else:
+        i = text.find("BTC Acquired")
+        if i < 0:
+            return []
+        tail = text[i:i + 1200]
+        j = tail.find("Average Purchase Price")
+        k = tail.find("Aggregate BTC Holdings")
+        start = max(j, k)
+        # Skip the rest of the header words, then read the first row of numbers.
+        nums = [_f(n) for n in _NUM.findall(re.sub(r"\(in [a-z]+\)", " ", tail[start:]))]
+        if len(nums) < 3:
+            return []
+        btc, total_m, avg = nums[0], nums[1], nums[2]
+        holdings = nums[3] if len(nums) > 3 else None
+        total = total_m * 1e6
+        if not (1_000 <= avg <= 10_000_000) or btc <= 0 or (holdings and holdings < btc):
+            return []
+    if not btc:
+        return []
+    note = f"{btc:,.0f} BTC，總額約 ${total / 1e6:,.1f}M" + (f"，均價 ${avg:,.0f}" if avg else "")
+    if holdings:
+        note += f"；累計持有 {holdings:,.0f} BTC"
+    return [Trade(investor_key, filed, filed, "buy", "8-K", "BTC", "Bitcoin", btc, avg, note, url)]

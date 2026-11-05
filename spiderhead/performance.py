@@ -15,6 +15,7 @@ from datetime import date, timedelta
 from .models import Signal, Stance
 
 STOOQ_URL = "https://stooq.com/q/d/l/?s={sym}&i=d"
+CRYPTO = {"BTC": "btcusd", "ETH": "ethusd", "SOL": "solusd"}   # Stooq crypto symbols
 HORIZONS = (30, 90)
 
 
@@ -41,7 +42,7 @@ class PriceBook:
         rows = self.store.prices(ticker)
         stale = not rows or rows[-1][0] < date.today() - timedelta(days=4)
         if stale and self.get is not None and len(self.errors) < 3:   # stop early when offline
-            sym = ticker.lower().replace(".", "-") + ".us"
+            sym = CRYPTO.get(ticker.upper()) or ticker.lower().replace(".", "-") + ".us"
             try:
                 fresh = parse_stooq_csv(self.get(STOOQ_URL.format(sym=sym), {}).decode("utf-8", "replace"))
                 if fresh:

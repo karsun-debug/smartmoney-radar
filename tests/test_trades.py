@@ -207,3 +207,22 @@ def test_hybrid_analyzer_routes_and_budget():
     assert h.analyze(own1) == [] and h.analyze(own2) == []           # 2 LLM calls
     assert h.analyze(own3) is None and h.deferred == 1               # over budget: deferred
     assert FakeLLM.calls == 2
+
+
+def test_btc_8k_prose_and_table():
+    from spiderhead.trades import parse_btc_8k
+    prose = ("<html><body><p>Item 8.01 Other Events.</p><p>During the period between October 27, 2026 and "
+             "November 2, 2026, Strategy Inc acquired 397 bitcoins for approximately $45.6 million in cash, "
+             "at an average price of approximately $114,771 per bitcoin, inclusive of fees and expenses.</p>"
+             "<p>As of November 2, 2026, Strategy, together with its subsidiaries, held an aggregate of "
+             "641,205 bitcoins.</p></body></html>")
+    [t] = parse_btc_8k(prose, "saylor", date(2026, 11, 3), "u")
+    assert (t.ticker, t.side, t.shares, t.price) == ("BTC", "buy", 397, 114_771)
+    assert "累計持有 641,205 BTC" in t.amount_text and "$45.6M" in t.amount_text
+    table = ("<table><tr><td>BTC Acquired</td><td>Aggregate Purchase Price (in millions)</td>"
+             "<td>Average Purchase Price</td><td>Aggregate BTC Holdings</td>"
+             "<td>Aggregate Purchase Price (in billions)</td></tr>"
+             "<tr><td>1,234</td><td>$ 141.2</td><td>$ 114,425</td><td>642,439</td><td>$ 47.6</td></tr></table>")
+    [t2] = parse_btc_8k(table, "saylor", date(2026, 11, 10))
+    assert (t2.shares, t2.price) == (1234, 114_425) and "642,439" in t2.amount_text
+    assert parse_btc_8k("<p>Item 2.02 Results of Operations</p>", "saylor", date(2026, 11, 1)) == []
