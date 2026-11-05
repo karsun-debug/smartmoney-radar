@@ -62,6 +62,8 @@ h1{font-size:26px;margin:0}h2{font-size:18px;margin:36px 0 12px}h3{font-size:15p
 .line{fill:none;stroke:var(--series);stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round}
 .area{fill:var(--series-soft)}
 .bar{fill:var(--series)}.bar:hover,.bar:focus{opacity:.75;outline:none}
+.bar.neg{fill:var(--bear)}
+.fin-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 .cross{stroke:var(--ink-2);stroke-width:1;vector-effect:non-scaling-stroke;visibility:hidden}
 .axis{display:flex;justify-content:space-between;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
 .tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--ink);border:1px solid var(--border);
@@ -122,7 +124,7 @@ def safe_url(url: str | None) -> str | None:
     return None
 
 
-NAV = [("index.html", "總覽"), ("macro.html", "總經"), ("banks.html", "投行 vs 大神"),
+NAV = [("index.html", "總覽"), ("macro.html", "總經"), ("earnings.html", "財報"), ("banks.html", "投行 vs 大神"),
        ("consensus.html", "大神共同持股"), ("clone.html", "跟單回測"),
        ("insiders.html", "內部人群買"), ("activist.html", "維權持股"), ("retail.html", "散戶 vs 大神"),
        ("buzz.html", "聲量排行"), ("weekly.html", "週報")]
@@ -213,6 +215,117 @@ def bar_chart(labels: list[str], values: list[int], height: int = 120, unit: str
             f'vector-effect="non-scaling-stroke"/></svg>'
             f'<div class="axis"><span>{esc(labels[0]) if labels else ""}</span>'
             f'<span>最高 {vmax}{esc(unit)}</span><span>{esc(labels[-1]) if labels else ""}</span></div></div>')
+
+
+def signed_bar_chart(labels: list[str], values: list[float | None], height: int = 110,
+                     fmt=lambda v: f"{v:,.0f}") -> str:
+    """Bars above/below a zero line (negative values in the 'bear' color)."""
+    vals = [v if v is not None else 0.0 for v in values]
+    top, bot = max(max(vals, default=0), 0), min(min(vals, default=0), 0)
+    span = (top - bot) or 1
+    zero = height * top / span
+    n = len(vals) or 1
+    slot = 100 / n
+    gap = min(1.2, slot * 0.25)
+    bars = []
+    for i, (lab, raw, v) in enumerate(zip(labels, values, vals)):
+        h = abs(v) / span * height
+        y = zero - h if v >= 0 else zero
+        tip = f"{lab}&#10;{'—' if raw is None else esc(fmt(raw))}"
+        bars.append(f'<rect class="bar{" neg" if v < 0 else ""}" tabindex="0" x="{i * slot + gap / 2:.2f}" '
+                    f'y="{y:.2f}" width="{slot - gap:.2f}" height="{max(h, 0.5):.2f}" data-tip="{tip}">'
+                    f'<title>{esc(lab)} {"—" if raw is None else esc(fmt(raw))}</title></rect>')
+    return (f'<div class="chart"><svg viewBox="0 0 100 {height}" preserveAspectRatio="none" height="{height}" role="img">'
+            f'{"".join(bars)}<line class="baseline" x1="0" x2="100" y1="{zero:.2f}" y2="{zero:.2f}" '
+            f'vector-effect="non-scaling-stroke"/></svg>'
+            f'<div class="axis"><span>{esc(labels[0]) if labels else ""}</span>'
+            f'<span>{esc(labels[-1]) if labels else ""}</span></div></div>')
+
+
+def _money(v: float | None) -> str:
+    if v is None:
+        return "—"
+    a = abs(v)
+    if a >= 1e9:
+        return f"${v / 1e9:,.2f}B"
+    if a >= 1e6:
+        return f"${v / 1e6:,.1f}M"
+    return f"${v:,.0f}"
+
+
+def _eps(v: float | None) -> str:
+    return "—" if v is None else f"${v:,.2f}"
+
+
+def _q(d: date) -> str:
+    return f"{d.year % 100:02d}Q{(d.month - 1) // 3 + 1}"
+
+
+def _ticker_financials(store: Store, ticker: str) -> str:
+    from .financials import yoy
+    snap = store.load_financials(ticker)
+    news = store.earnings_news(ticker, 8)
+    parts = []
+    if snap and snap.quarters:
+        qs = snap.quarters[-8:]
+        labels = [_q(q.end) for q in qs]
+        charts = [
+            ("營收", [q.get("revenue") for q in qs], _money),
+            ("淨利", [q.get("net_income") for q in qs], _money),
+            ("自由現金流", [q.fcf for q in qs], _money),
+            ("EPS（稀釋）", [q.get("eps") for q in qs], lambda v: f"${v:,.2f}"),
+        ]
+        cards = "".join(f'<div class="card"><h3>{name}</h3>{signed_bar_chart(labels, vals, fmt=fmt)}</div>'
+                        for name, vals, fmt in charts if any(v is not None for v in vals))
+        rows = "".join(
+            f'<tr><td>{_q(q.end)}<div class="sub">{q.end}</div></td><td class="num">{_money(q.get("revenue"))}'
+            f'<div class="sub">年增 {_pct(yoy(snap.quarters, q, "revenue"))}</div></td>'
+            f'<td class="num">{_pct(q.margin("gross_profit")).lstrip("+")}</td>'
+            f'<td class="num">{_pct(q.margin("operating_income")).lstrip("+")}</td>'
+            f'<td class="num">{_money(q.get("net_income"))}<div class="sub">淨利率 {_pct(q.margin("net_income")).lstrip("+")}</div></td>'
+            f'<td class="num">{_eps(q.get("eps"))}'
+            f'<div class="sub">年增 {_pct(yoy(snap.quarters, q, "eps"))}</div></td>'
+            f'<td class="num">{_money(q.fcf)}</td></tr>' for q in reversed(qs))
+        parts.append(
+            f'<h2>財報（SEC 申報資料）</h2><p class="sub">{esc(snap.name)} · 最近 {len(qs)} 季；'
+            f'第四季由全年減前三季推算。</p><div class="fin-grid">{cards}</div>'
+            f'<div class="tablewrap" style="margin-top:12px"><table><tr><th>季度</th><th class="num">營收</th>'
+            f'<th class="num">毛利率</th><th class="num">營業利益率</th><th class="num">淨利</th>'
+            f'<th class="num">EPS</th><th class="num">自由現金流</th></tr>{rows}</table></div>')
+    if news:
+        items = "".join(
+            f'<li><div class="sub">{d}</div><div class="txt">'
+            + (f'<a href="{esc(safe_url(u))}" rel="noopener" target="_blank">{esc(t)}</a>' if safe_url(u) else esc(t))
+            + '</div></li>' for d, t, u in news)
+        parts.append(f'<h2>財報分析與報導（別人怎麼看）</h2><ul class="feed">{items}</ul>')
+    return "".join(parts)
+
+
+def render_earnings(store: Store) -> str:
+    snaps = [s for s in (store.load_financials(t) for t in store.financial_tickers()) if s and s.latest]
+    note = ('<p class="sub">資料來自 SEC XBRL 財報（10-Q / 10-K，免費公開），涵蓋大神持有、喊單或投行有評等的公司，'
+            '每週更新。點股票代號看圖表與財報分析報導。</p>')
+    if not snaps:
+        body = f'<h1>財報</h1>{note}<p class="empty">還沒有財報資料，執行 <code>spiderhead fetch</code>（需要 SPIDERHEAD_USER_AGENT）。</p>'
+        return _page("財報 · Smartmoney Radar", body, "", "earnings.html")
+    snaps.sort(key=lambda s: -(s.growth("revenue") if s.growth("revenue") is not None else -1e9))
+    rows = []
+    for s in snaps:
+        q = s.latest
+        g = s.growth("revenue")
+        rows.append(
+            f'<tr><td>{_tick(s.ticker, "")}<div class="sub">{esc(s.name[:28])}</div></td><td>{_q(q.end)}</td>'
+            f'<td class="num">{_money(q.get("revenue"))}</td>'
+            f'<td class="num">{_pct(g)}{_bar(None if g is None else max(0.0, min(1.0, (g + 50) / 100)))}</td>'
+            f'<td class="num">{_pct(q.margin("gross_profit")).lstrip("+")}</td>'
+            f'<td class="num">{_pct(q.margin("operating_income")).lstrip("+")}</td>'
+            f'<td class="num">{_pct(s.growth("eps"))}</td><td class="num">{_money(q.fcf)}</td>'
+            f'<td>{q.end + timedelta(days=91 + 35):%m/%d}</td></tr>')
+    table = ('<div class="tablewrap"><table><tr><th>公司</th><th>最新季</th><th class="num">營收</th>'
+             '<th class="num">營收年增</th><th class="num">毛利率</th><th class="num">營業利益率</th>'
+             '<th class="num">EPS 年增</th><th class="num">自由現金流</th><th>預估下次財報</th></tr>'
+             + "".join(rows) + '</table></div><p class="sub">「預估下次財報」＝最新季末 + 約 126 天，僅供參考。</p>')
+    return _page("財報 · Smartmoney Radar", f"<h1>財報</h1>{note}{table}", "", "earnings.html")
 
 
 def _feed_html(rows: list[tuple[Post, list[Signal]]], names: dict[str, str], root: str,
@@ -848,6 +961,7 @@ def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
             f'{chart}<h2>誰在談</h2>{talk}<h2>大神的實際交易（對帳單）</h2>'
             f'{trades_table(trades, names, "../")}'
             f'{_ticker_13f(consensus, ticker, names)}'
+            f'{_ticker_financials(store, ticker)}'
             f'{_ticker_banks(store, ticker)}'
             f'{_ticker_shorts(store, ticker)}')
     return _page(f"{ticker} · Smartmoney Radar", body, "../")
@@ -1057,6 +1171,7 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     (out / "buzz.html").write_text(render_buzz(store, investors, names), encoding="utf-8")
     (out / "macro.html").write_text(render_macro(store, names), encoding="utf-8")
     (out / "banks.html").write_text(render_banks(store, names, prices), encoding="utf-8")
+    (out / "earnings.html").write_text(render_earnings(store), encoding="utf-8")
     (out / "activist.html").write_text(render_activist(store, names), encoding="utf-8")
     (out / "clone.html").write_text(render_clone(clones, names, prices is not None), encoding="utf-8")
     clone_by = {r.investor: r for r in clones}
@@ -1072,6 +1187,7 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     from .insiders import find_clusters
     tickers |= {c.ticker for c in find_clusters(store.insider_buys_between(end - timedelta(days=13), end))}
     tickers |= {c.ticker for c in store.bank_calls(end - timedelta(days=90), end)}
+    tickers |= set(store.financial_tickers())
     for t in sorted(tickers):
         (out / "ticker" / f"{_slug(t)}.html").write_text(
             render_ticker(store, t, names, days, prices, consensus), encoding="utf-8")

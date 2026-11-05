@@ -111,6 +111,26 @@ def main(days: int = 90, seed: int = 7) -> None:
             rows.append((today - timedelta(days=d), round(v, 4)))
         store.add_macro(s.sid, rows)
 
+    # Synthetic quarterly financials and bank calls for a few tickers.
+    from spiderhead.banks import BankCall
+    from spiderhead.financials import Quarter
+    for t, rev0, g, margin in (("NVDA", 30e9, 0.12, 0.55), ("TSLA", 25e9, 0.01, 0.07), ("GOOGL", 85e9, 0.035, 0.28)):
+        qs = []
+        for i in range(10):
+            end = date(2024 + i // 4, [3, 6, 9, 12][i % 4], [31, 30, 30, 31][i % 4])
+            rev = rev0 * (1 + g) ** i * (1 + rnd.gauss(0, 0.02))
+            ni = rev * margin * (1 + rnd.gauss(0, 0.1)) - (3e9 if t == "TSLA" and i == 6 else 0)
+            qs.append(Quarter(end, {"revenue": rev, "gross_profit": rev * (margin + 0.2), "operating_income": rev * margin * 1.1,
+                                    "net_income": ni, "eps": ni / 2.4e9, "ocf": ni * 1.2, "capex": rev * 0.05}))
+        store.save_financials(t, "0", f"{t} (demo)", qs)
+    store.add_bank_calls([
+        BankCall("goldman", today - timedelta(days=100), "NVDA", "upgrade", "bullish", "Buy", 950.0, None, "demo", None),
+        BankCall("morganstanley", today - timedelta(days=120), "TSLA", "upgrade", "bullish", "Overweight", 400.0, None, "demo", None),
+        BankCall("jpmorgan", today - timedelta(days=95), "TSLA", "downgrade", "bearish", "Underweight", 120.0, None, "demo", None),
+        BankCall("citi", today - timedelta(days=200), "GOOGL", "initiate", "bullish", "Buy", 200.0, None, "demo", None),
+        BankCall("ubs", today - timedelta(days=10), "NVDA", "downgrade", "bearish", "Neutral", None, None, "demo", None),
+    ])
+
     print(f"demo posts: {len(posts)}, trades: {len(trades)}")
 
 

@@ -72,6 +72,17 @@ CREATE TABLE IF NOT EXISTS bank_calls (
     stance TEXT NOT NULL, rating TEXT, target REAL, prior_target REAL, headline TEXT, url TEXT,
     PRIMARY KEY (bank, ticker, published, action)
 );
+CREATE TABLE IF NOT EXISTS fin_meta (
+    ticker TEXT PRIMARY KEY, cik TEXT, name TEXT, fetched TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fin_values (
+    ticker TEXT NOT NULL, period_end TEXT NOT NULL, metric TEXT NOT NULL, value REAL NOT NULL,
+    PRIMARY KEY (ticker, period_end, metric)
+);
+CREATE TABLE IF NOT EXISTS earnings_news (
+    ticker TEXT NOT NULL, published TEXT NOT NULL, title TEXT NOT NULL, url TEXT,
+    PRIMARY KEY (ticker, title)
+);
 CREATE TABLE IF NOT EXISTS prices (
     ticker TEXT NOT NULL, day TEXT NOT NULL, close REAL NOT NULL, PRIMARY KEY (ticker, day)
 );
@@ -332,6 +343,46 @@ class Store:
             args.append(ticker.upper())
         return [BankCall(r[0], date.fromisoformat(r[1]), r[2], r[3], r[4], r[5], r[6], r[7], r[8] or "", r[9])
                 for r in self.db.execute(q + " ORDER BY published DESC", args)]
+
+    # ------------------------------------------------------------- financials
+    def financials_fetched(self, ticker: str) -> date | None:
+        r = self.db.execute("SELECT fetched FROM fin_meta WHERE ticker = ?", (ticker.upper(),)).fetchone()
+        return date.fromisoformat(r[0]) if r else None
+
+    def save_financials(self, ticker: str, cik: str, name: str, quarters) -> None:
+        t = ticker.upper()
+        self.db.execute("DELETE FROM fin_values WHERE ticker = ?", (t,))
+        self.db.executemany("INSERT OR REPLACE INTO fin_values VALUES (?,?,?,?)",
+                            [(t, q.end.isoformat(), k, v) for q in quarters for k, v in q.values.items()])
+        self.db.execute("INSERT OR REPLACE INTO fin_meta VALUES (?,?,?,?)",
+                        (t, cik, name, date.today().isoformat()))
+        self.db.commit()
+
+    def load_financials(self, ticker: str):
+        from .financials import Quarter, Snapshot
+        t = ticker.upper()
+        meta = self.db.execute("SELECT name FROM fin_meta WHERE ticker = ?", (t,)).fetchone()
+        if not meta:
+            return None
+        by_end: dict[str, dict[str, float]] = {}
+        for end, metric, value in self.db.execute(
+                "SELECT period_end, metric, value FROM fin_values WHERE ticker = ? ORDER BY period_end", (t,)):
+            by_end.setdefault(end, {})[metric] = value
+        return Snapshot(t, meta[0] or t, [Quarter(date.fromisoformat(e), v) for e, v in by_end.items()])
+
+    def financial_tickers(self) -> list[str]:
+        return [r[0] for r in self.db.execute("SELECT ticker FROM fin_meta ORDER BY ticker")]
+
+    def add_earnings_news(self, rows) -> int:
+        cur = self.db.executemany("INSERT OR IGNORE INTO earnings_news VALUES (?,?,?,?)",
+                                  [(t, d.isoformat(), title, url) for t, d, title, url in rows])
+        self.db.commit()
+        return cur.rowcount
+
+    def earnings_news(self, ticker: str, limit: int = 10) -> list[tuple[date, str, str | None]]:
+        return [(date.fromisoformat(d), title, url) for d, title, url in self.db.execute(
+            "SELECT published, title, url FROM earnings_news WHERE ticker = ? ORDER BY published DESC LIMIT ?",
+            (ticker.upper(), limit))]
 
     # ------------------------------------------------------------- ARK
     def save_ark(self, fund: str, day: date, rows) -> None:

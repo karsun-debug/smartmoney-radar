@@ -110,6 +110,14 @@ class EdgarClient:
         """Any EDGAR URL as text, through the rate limiter and User-Agent."""
         return self._get(url).text
 
+    def get_bytes(self, url: str) -> bytes:
+        return self._get(url).content
+
+    def ticker_cik_map(self) -> dict[str, tuple[str, str]]:
+        """Ticker -> (CIK, company name) from SEC's company_tickers.json."""
+        data = self._get(COMPANY_TICKERS_URL).json()
+        return {row["ticker"].upper(): (str(row["cik_str"]), row["title"]) for row in data.values()}
+
     def entity_name(self, cik: str) -> str:
         """Registered name of the entity behind a CIK (for checking the watchlist)."""
         return self._get(SUBMISSIONS_URL.format(cik=str(cik).zfill(10))).json().get("name", "")

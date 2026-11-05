@@ -143,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--no-buzz", action="store_true", help="skip Wikipedia pageviews")
     f.add_argument("--no-macro", action="store_true", help="skip FRED macro series")
     f.add_argument("--no-banks", action="store_true", help="skip investment-bank rating changes")
+    f.add_argument("--no-financials", action="store_true", help="skip SEC XBRL financials and earnings news")
 
     im = sub.add_parser("import", help="匯入手動整理的貼文 JSON/JSONL")
     im.add_argument("posts_file")
@@ -300,6 +301,8 @@ def _store_commands(args, investors) -> int:
             calls = collect_bank_calls(_requests_get, NameResolver(_sec_names()), health=hl)
             store.log_results(hl.results)
             print(f"投行評等：抓到 {len(calls)} 筆，新增 {store.add_bank_calls(calls)} 筆")
+        if args.cmd == "fetch" and not args.no_financials:
+            _fetch_financials(store, investors)
         if args.cmd == "fetch" and not args.no_macro:
             from .health import HealthLog
             from .macro import fetch_macro
@@ -549,3 +552,29 @@ def _sec_names() -> dict[str, str]:
             except Exception as exc:
                 print(f"warning: SEC name map: {exc}", file=sys.stderr)
     return _SEC_NAMES
+
+
+def _fetch_financials(store, investors) -> None:
+    import os
+    from .financials import fetch_earnings_news, fetch_financials, focus_tickers
+    from .health import HealthLog
+    from .sources import _requests_get
+    hl = HealthLog()
+    tickers = focus_tickers(store, investors)
+    names = {}
+    if os.environ.get("SPIDERHEAD_USER_AGENT"):
+        try:
+            from .edgar import EdgarClient
+            client = EdgarClient()
+            ciks = client.ticker_cik_map()
+            names = {t: v[1] for t, v in ciks.items()}
+            n = fetch_financials(store, client.get_bytes, ciks, tickers, health=hl)
+            print(f"財報：更新 {n} 家公司")
+        except Exception as exc:
+            print(f"warning: financials: {exc}", file=sys.stderr)
+    else:
+        print("warning: SPIDERHEAD_USER_AGENT not set; skipping SEC financials", file=sys.stderr)
+    # Rotate earnings-news coverage: least recently covered first.
+    tickers.sort(key=lambda t: (store.earnings_news(t, 1) or [(date.min, "", None)])[0][0])
+    fetch_earnings_news(store, _requests_get, tickers, names, health=hl)
+    store.log_results(hl.results)
