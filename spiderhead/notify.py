@@ -50,6 +50,17 @@ def format_line(d: Digest, dashboard_url: str | None = None, max_posts: int = 8)
             views = " ".join(f"{d.names.get(k, k)}{ICON[s.value]}" for k, s in sorted(c.views.items()))
             out.append(f"• {c.ticker}：{views}")
 
+    if d.trades:
+        side = {"buy": "🟢買進", "sell": "🔴賣出", "stake": "🔷持股逾5%", "exchange": "⚪交換"}
+        out += ["", "🧾 最新對帳單（實際申報交易）"]
+        for t in d.trades[:8]:
+            size = t.amount_text or (f"{t.shares:,.0f}股" if t.shares else "")
+            out.append(f"• {d.names.get(t.investor_key, t.investor_key)} {side.get(t.side, t.side)} "
+                       f"{t.ticker or t.issuer[:30]} {size}（{t.traded:%m/%d}）"
+                       + (f"\n  {t.url}" if t.url else ""))
+        if len(d.trades) > 8:
+            out.append(f"…還有 {len(d.trades) - 8} 筆")
+
     out += ["", "👤 大神動態"]
     if not d.feed:
         out.append("（沒有新發文）")

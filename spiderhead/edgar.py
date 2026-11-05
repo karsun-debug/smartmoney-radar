@@ -61,6 +61,7 @@ class EdgarClient:
                 cik=cik, accession=recent["accessionNumber"][i], form=form,
                 filing_date=date.fromisoformat(recent["filingDate"][i]),
                 report_date=date.fromisoformat(report) if report else None,
+                primary_doc=recent.get("primaryDocument", [""] * len(recent["form"]))[i],
             ))
             if len(out) >= limit:
                 break
@@ -86,6 +87,24 @@ class EdgarClient:
             if b"informationTable" in body or b"infoTable" in body:
                 return body
         raise LookupError(f"No information table found in {filing.accession}")
+
+    def filing_index_url(self, filing: Filing) -> str:
+        acc = filing.accession.replace("-", "")
+        return f"https://www.sec.gov/Archives/edgar/data/{int(filing.cik)}/{acc}/{filing.accession}-index.htm"
+
+    def fetch_primary_xml(self, filing: Filing) -> bytes:
+        """Raw XML of an XML-based filing (Form 4). The submissions API points at
+        the XSL-rendered copy (``xslF345X05/doc.xml``); the raw file sits one level up."""
+        name = filing.primary_doc.rsplit("/", 1)[-1]
+        acc = filing.accession.replace("-", "")
+        return self._get(ARCHIVE_FILE_URL.format(cik_int=int(filing.cik), acc=acc, name=name)).content
+
+    def fetch_header(self, filing: Filing) -> str:
+        """SGML header (has SUBJECT COMPANY for 13D/G)."""
+        acc = filing.accession.replace("-", "")
+        url = ARCHIVE_FILE_URL.format(cik_int=int(filing.cik), acc=acc,
+                                      name=f"{filing.accession}-index-headers.html")
+        return self._get(url).text
 
     def entity_name(self, cik: str) -> str:
         """Registered name of the entity behind a CIK (for checking the watchlist)."""

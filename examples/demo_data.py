@@ -7,11 +7,14 @@ previewed without network access. Every post is fake and marked source="demo".
 import random
 from datetime import date, timedelta
 
-from spiderhead.models import Post
+import math
+
+from spiderhead.models import Post, Trade
 from spiderhead.posts import KeywordAnalyzer
 from spiderhead.store import Store
 
 TEMPLATES = {
+    "pelosi": ["Pelosi says AI chips are the future; very bullish on $NVDA (interview)."],
     "ackman": ["We bought a new position in $GOOGL. Undervalued AI leader.",
                "Adding to $CMG, a great business with long runway.",
                "The Fed should cut interest rates now; Treasury yields are too high."],
@@ -52,7 +55,33 @@ def main(days: int = 90, seed: int = 7) -> None:
     store.add_posts(posts)
     for p in store.unanalyzed():
         store.save_signals(p, KeywordAnalyzer().analyze(p))
-    print(f"demo posts: {len(posts)}")
+
+    # Synthetic prices (random walks with a drift) so call scoring has data.
+    drift = {"NVDA": 0.004, "GOOGL": 0.002, "TSLA": -0.001, "BABA": 0.001, "CB": 0.0005,
+             "META": 0.0015, "COIN": -0.002, "CMG": 0.0, "JD": 0.0005, "AAPL": 0.0002, "UNH": -0.001}
+    for t, mu in drift.items():
+        price, rows = 100.0, []
+        for d in range(days + 400, -1, -1):
+            price *= math.exp(mu + rnd.gauss(0, 0.015))
+            rows.append((today - timedelta(days=d), round(price, 2)))
+        store.add_prices(t, rows)
+
+    # Synthetic filed trades ("對帳單").
+    trades = [
+        Trade("ackman", today - timedelta(days=12), today - timedelta(days=9), "buy", "4", "GOOGL",
+              "Alphabet Inc.", 2_000_000, 172.4),
+        Trade("buffett", today - timedelta(days=5), today - timedelta(days=3), "buy", "4", "OXY",
+              "Occidental Petroleum", 1_500_000, 48.2),
+        Trade("pelosi", today - timedelta(days=40), today - timedelta(days=2), "buy", "PTR", "NVDA",
+              "NVIDIA Corporation", amount_text="$1,000,001 - $5,000,000（配偶）"),
+        Trade("pelosi", today - timedelta(days=38), today - timedelta(days=2), "sell", "PTR", "TSLA",
+              "Tesla Inc", amount_text="$250,001 - $500,000（配偶）"),
+        Trade("loeb", today - timedelta(days=20), today - timedelta(days=15), "stake", "SCHEDULE 13D",
+              "META", "Meta Platforms"),
+        Trade("burry", today - timedelta(days=8), today - timedelta(days=6), "sell", "4", "BABA", "Alibaba"),
+    ]
+    store.add_trades(trades)
+    print(f"demo posts: {len(posts)}, trades: {len(trades)}")
 
 
 if __name__ == "__main__":

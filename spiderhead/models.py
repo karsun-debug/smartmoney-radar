@@ -13,7 +13,7 @@ class Investor:
     fund: str           # filing entity, e.g. "Berkshire Hathaway Inc"
     cik: str            # SEC Central Index Key of the filing entity
     handles: dict[str, str] = field(default_factory=dict)  # {"x": "...", "rss": "..."}
-    proof: str = "13F"  # how their trades are verified: "13F", "13F+daily", "8-K"
+    proof: str = "13F"  # how trades are verified: "13F", "13F+daily", "8-K", "STOCK Act"
     note: str = ""      # caveats shown on the dashboard
 
     @property
@@ -72,6 +72,7 @@ class Filing:
     form: str
     filing_date: date
     report_date: date | None   # quarter end the holdings refer to
+    primary_doc: str = ""      # primaryDocument from the submissions API
 
 
 @dataclass(frozen=True)
@@ -122,3 +123,31 @@ class ConsistencyItem:
     signal: Signal
     verdict: Verdict
     change: PositionChange | None
+
+
+@dataclass(frozen=True)
+class Trade:
+    """A verified transaction from an official filing ("對帳單")."""
+    investor_key: str
+    traded: date               # transaction date (or filing date when unknown)
+    filed: date
+    side: str                  # "buy" / "sell" / "stake" (13D/G: crossed 5%) / "exchange"
+    form: str                  # "4", "SC 13D", "SCHEDULE 13G", "PTR" (congress), ...
+    ticker: str | None
+    issuer: str
+    shares: float | None = None
+    price: float | None = None
+    amount_text: str = ""      # e.g. "$1,001 - $15,000" for congress disclosures
+    url: str | None = None
+
+    @property
+    def uid(self) -> str:
+        import hashlib
+        basis = f"{self.investor_key}|{self.form}|{self.url}|{self.traded}|{self.issuer}|{self.side}|{self.shares}"
+        return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
+
+    @property
+    def value_usd(self) -> float | None:
+        if self.shares is not None and self.price is not None:
+            return self.shares * self.price
+        return None

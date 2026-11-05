@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import date
 
-from .models import ChangeType, ConsistencyItem, PositionChange, Signal, Stance, Verdict
+from .models import ChangeType, ConsistencyItem, PositionChange, Signal, Stance, Trade, Verdict
 
 BUYING = {ChangeType.NEW, ChangeType.ADD}
 SELLING = {ChangeType.TRIM, ChangeType.EXIT}
@@ -54,3 +55,39 @@ def check(signals: Iterable[Signal], changes: Iterable[PositionChange]) -> list[
             verdict = Verdict.CONTRADICTS
         items.append(ConsistencyItem(sig, verdict, row))
     return items
+
+
+@dataclass(frozen=True)
+class TradeCheck:
+    signal: Signal
+    verdict: Verdict
+    trade: Trade
+    days_after: int          # trade date minus post date (negative = traded before posting)
+
+
+def check_trades(signals: Iterable[Signal], trades: Iterable[Trade],
+                 before_days: int = 30, after_days: int = 90) -> list[TradeCheck]:
+    """Match public calls with filed trades in the same ticker around the post date.
+
+    Uses Form 4 / 13D / congressional disclosures, which arrive within days,
+    so this verdict is far more timely than the quarterly 13F comparison.
+    """
+    by_key: dict[tuple[str, str], list[Trade]] = {}
+    for t in trades:
+        if t.ticker:
+            by_key.setdefault((t.investor_key, t.ticker.upper()), []).append(t)
+    out = []
+    for sig in signals:
+        if sig.stance is Stance.NEUTRAL or sig.ticker.startswith(("MACRO:", "SECTOR:")):
+            continue
+        cands = [t for t in by_key.get((sig.post.investor_key, sig.ticker.upper()), [])
+                 if -before_days <= (t.traded - sig.post.published).days <= after_days]
+        if not cands:
+            continue
+        t = min(cands, key=lambda t: abs((t.traded - sig.post.published).days))
+        direction = -1 if t.side == "sell" else 1 if t.side in ("buy", "stake") else 0
+        want = 1 if sig.stance is Stance.BULLISH else -1
+        verdict = Verdict.HELD if direction == 0 else (
+            Verdict.CONSISTENT if direction == want else Verdict.CONTRADICTS)
+        out.append(TradeCheck(sig, verdict, t, (t.traded - sig.post.published).days))
+    return out

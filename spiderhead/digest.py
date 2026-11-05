@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from .models import Investor, Post, Signal
+from .models import Investor, Post, Signal, Trade
 from .sectors import SECTORS
 from .store import Store, window
 from .trends import SectorTrend, TickerConsensus, consensus, sector_trends
@@ -25,6 +25,7 @@ class Digest:
     trends: list[SectorTrend]
     consensus: list[TickerConsensus]
     names: dict[str, str]
+    trades: list[Trade] = field(default_factory=list)  # filed in the window, newest first
 
 
 def build_digest(store: Store, investors: dict[str, Investor], days: int,
@@ -38,6 +39,7 @@ def build_digest(store: Store, investors: dict[str, Investor], days: int,
         start, end, [(p, store.signals_for(p)) for p in posts],
         sector_trends(cur, store.signals_between(prev_start, prev_end)),
         consensus(cur), display_names(investors),
+        [t for t in store.trades_between(start, end, by="filed") if t.investor_key in investors],
     )
 
 

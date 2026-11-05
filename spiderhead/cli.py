@@ -38,7 +38,9 @@ def _changes_from_edgar(investor, resolver_from_sec: bool):
     curr_f, prev_f = filings
     curr = parse_infotable(client.fetch_infotable_xml(curr_f))
     prev = parse_infotable(client.fetch_infotable_xml(prev_f))
-    resolver = TickerResolver(name_map=client.company_name_map() if resolver_from_sec else None)
+    from .holdings import OpenFigi
+    resolver = TickerResolver(name_map=client.company_name_map() if resolver_from_sec else None,
+                              figi=OpenFigi())
     return str(curr_f.report_date), diff_holdings(prev, curr, resolver)
 
 
@@ -75,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     db.add_argument("--out", default="site", help="輸出資料夾")
     db.add_argument("--days", type=int, default=90)
     db.add_argument("--with-13f", action="store_true", help="從 EDGAR 抓最新 13F 放進大神頁面")
+    db.add_argument("--no-prices", action="store_true", help="不抓股價（喊單勝率與個股走勢圖會留空）")
 
     f = sub.add_parser("fetch", help="自動抓取大神發文與產業新聞，存進資料庫並分析")
     f.add_argument("--days", type=int, default=7, help="只保留最近 N 天")
@@ -82,6 +85,8 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--no-news", action="store_true", help="skip Google News per investor")
     f.add_argument("--no-industry", action="store_true", help="skip industry news")
     f.add_argument("--llm", action="store_true", help="analyze with Claude")
+    f.add_argument("--no-trades", action="store_true",
+                   help="skip Form 4 / 13D / congress trade collection")
 
     im = sub.add_parser("import", help="匯入手動整理的貼文 JSON/JSONL")
     im.add_argument("posts_file")
@@ -197,6 +202,9 @@ def _store_commands(args, investors) -> int:
         added = store.add_posts(posts)
         analyzed = _analyze_pending(store, analyzer)
         print(f"抓到 {len(posts)} 則，新增 {added} 則，分析 {analyzed} 則")
+        if args.cmd == "fetch" and not args.no_trades:
+            trades = _collect_trades(investors, max(args.days, 30))
+            print(f"對帳單：抓到 {len(trades)} 筆，新增 {store.add_trades(trades)} 筆")
         return 0
 
     if args.cmd == "push-line":
@@ -215,7 +223,15 @@ def _store_commands(args, investors) -> int:
     if args.cmd == "dashboard":
         from .dashboard import build_site
         holdings = _holdings_for_dashboard(store, investors) if args.with_13f else None
-        index = build_site(store, investors, args.out, days=args.days, holdings=holdings)
+        prices = None
+        if not args.no_prices:
+            from .performance import PriceBook
+            from .sources import _requests_get
+            prices = PriceBook(store, _requests_get)
+        index = build_site(store, investors, args.out, days=args.days, holdings=holdings,
+                           prices=prices)
+        for err in (prices.errors if prices else [])[:3]:
+            print(f"warning: {err}", file=sys.stderr)
         print(f"已產生 {index}")
         return 0
 
@@ -251,3 +267,25 @@ def _holdings_for_dashboard(store, investors):
         signals = [s for p in posts for s in (store.signals_for(p) or analyzer.analyze(p))]
         out[inv.key] = (quarter, changes, check(signals, changes))
     return out
+
+
+def _collect_trades(investors, days: int):
+    import os
+    from .holdings import TickerResolver
+    from .sources import _requests_get
+    from .trades import TradeCollector
+    edgar, resolver = None, None
+    if os.environ.get("SPIDERHEAD_USER_AGENT"):
+        from .edgar import EdgarClient
+        edgar = EdgarClient()
+        try:
+            resolver = TickerResolver(name_map=edgar.company_name_map())
+        except Exception as exc:
+            print(f"warning: ticker map: {exc}", file=sys.stderr)
+    else:
+        print("warning: SPIDERHEAD_USER_AGENT not set; skipping SEC Form 4 / 13D", file=sys.stderr)
+    collector = TradeCollector(edgar, _requests_get, resolver.name if resolver else None)
+    trades = collector.collect(investors.values(), days)
+    for err in collector.errors:
+        print(f"warning: {err}", file=sys.stderr)
+    return trades

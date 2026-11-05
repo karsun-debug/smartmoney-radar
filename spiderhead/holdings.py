@@ -109,11 +109,60 @@ class TickerResolver:
     """
 
     def __init__(self, cusip_map: dict[str, str] | None = None,
-                 name_map: dict[str, str] | None = None):
+                 name_map: dict[str, str] | None = None,
+                 figi: "OpenFigi | None" = None):
         self.cusip_map = {k.upper(): v.upper() for k, v in (cusip_map or {}).items()}
         self.name_map = {_norm(k): v.upper() for k, v in (name_map or {}).items()}
+        self.figi = figi
 
     def __call__(self, h: Holding) -> str | None:
         if h.cusip in self.cusip_map:
             return self.cusip_map[h.cusip]
-        return self.name_map.get(_norm(h.issuer))
+        by_name = self.name_map.get(_norm(h.issuer))
+        if by_name:
+            return by_name
+        if self.figi is not None:
+            ticker = self.figi.lookup(h.cusip)
+            if ticker:
+                self.cusip_map[h.cusip] = ticker
+            return ticker
+        return None
+
+    def name(self, issuer: str) -> str | None:
+        return self.name_map.get(_norm(issuer))
+
+
+class OpenFigi:
+    """CUSIP -> ticker through the free OpenFIGI mapping API (fallback for odd names).
+
+    Keyless use is rate limited; set ``OPENFIGI_API_KEY`` for higher limits.
+    """
+    URL = "https://api.openfigi.com/v3/mapping"
+
+    def __init__(self, http_post=None, api_key: str | None = None):
+        import os
+        self.post = http_post or self._post
+        self.key = api_key or os.environ.get("OPENFIGI_API_KEY")
+        self.failed = False
+
+    def _post(self, url: str, headers: dict, body: bytes) -> bytes:
+        import requests
+        resp = requests.post(url, headers=headers, data=body, timeout=20)
+        resp.raise_for_status()
+        return resp.content
+
+    def lookup(self, cusip: str) -> str | None:
+        import json
+        if self.failed:
+            return None
+        headers = {"Content-Type": "application/json"}
+        if self.key:
+            headers["X-OPENFIGI-APIKEY"] = self.key
+        body = json.dumps([{"idType": "ID_CUSIP", "idValue": cusip, "exchCode": "US"}]).encode()
+        try:
+            data = json.loads(self.post(self.URL, headers, body))
+        except Exception:
+            self.failed = True          # rate limited / offline: stop trying this run
+            return None
+        rows = (data[0] or {}).get("data") or [] if data else []
+        return rows[0].get("ticker", "").upper() or None if rows else None

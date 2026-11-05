@@ -7,7 +7,13 @@
 - **觀點分析**：抽出提到的個股、產業、看多/看空（關鍵字或 Claude）。
 - **產業熱度**：哪些產業被最多大神談到、偏多還是偏空、和上一期比熱度變化。
 - **共識標的**：兩位以上大神同時在談的個股，以及他們各自的立場。
-- **言行比對**：觀點 vs 13F 持倉變化。
+- **即時對帳單**：Form 4、13D/G、國會議員交易申報（Pelosi 等），每筆附原始文件連結。
+- **言行比對**：發言 vs 實際申報交易，以及 vs 13F 季度持倉。
+- **喊單勝率**：發言後 30 / 90 天股價表現，排出誰最準。
+- **LINE 推播**：每天早上收到摘要。
+- **網頁儀表板**：產業熱度變化圖、每位大神一頁、每檔個股一頁，手機可看、支援深色模式。
+
+與 GitHub 上同類專案的比較見 [docs/DESIGN.md](docs/DESIGN.md#7-與-github-同類專案比較2026-11-調查)。
 
 設計細節見 [docs/DESIGN.md](docs/DESIGN.md)。
 
@@ -63,7 +69,48 @@ crontab -e   # 加入：0 8 * * * cd /path/to/SpiderHead && spiderhead fetch && 
 
 `sources.example.json` 示範如何加 RSS、改搜尋關鍵字、關掉某個來源（設為 `null`）。
 
+### LINE 推播
+
+1. 到 [LINE Developers](https://developers.line.biz/) 建立 Messaging API channel（會同時建立一個 LINE 官方帳號），用手機加它好友。
+2. 在 channel 設定頁發行 **Channel access token (long-lived)**。
+3. 設定環境變數後推播（`LINE_TO` 可填你的 userId；不填會廣播給所有好友）：
+
+```bash
+export LINE_CHANNEL_ACCESS_TOKEN="你的 token"
+```
+
+```bash
+spiderhead push-line --days 1 --dry-run
+```
+
+確認內容後拿掉 `--dry-run` 就會送出。
+
+### 網頁儀表板
+
+```bash
+spiderhead dashboard --out site --days 90 --with-13f
+```
+
+打開 `site/index.html` 即可。沒有網路時加 `--no-prices`。想先看效果可以用假資料：
+
+```bash
+SPIDERHEAD_DB=data/demo.db python examples/demo_data.py && SPIDERHEAD_DB=data/demo.db spiderhead dashboard --out site-demo
+```
+
+### 每天自動執行（GitHub Actions）
+
+`.github/workflows/daily.yml` 每天台灣時間 07:17 會：抓資料 → 產生儀表板發佈到 GitHub Pages → 推 LINE。
+到 repo 的 Settings → Secrets and variables → Actions 加入 `SPIDERHEAD_USER_AGENT`、`LINE_CHANNEL_ACCESS_TOKEN`（選填：`LINE_TO`、`ANTHROPIC_API_KEY`、`X_BEARER_TOKEN`），
+再到 Settings → Pages 把來源設為 GitHub Actions。免費方案的 Pages 網站是公開的。
+
 ### 持倉與言行比對
+
+追蹤名單挑選標準：**網路聲量高**，而且**有官方申報可以對帳**。預設 10 位：Ackman、Cathie Wood、Burry、Buffett、Druckenmiller、Tepper、Dalio、Loeb、Saylor、Pelosi。
+`watchlist.example.json` 示範如何加上段永平、李錄，或移除某人。第一次使用請確認 CIK：
+
+```bash
+spiderhead verify-ciks
+```
 
 列出追蹤名單：
 

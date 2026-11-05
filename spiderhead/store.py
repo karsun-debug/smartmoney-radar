@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from .models import Post, Signal, Stance
+from .models import Post, Signal, Stance, Trade
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS posts (
@@ -21,6 +21,15 @@ CREATE TABLE IF NOT EXISTS signals (
     sector TEXT, stance TEXT NOT NULL, confidence REAL, rationale TEXT
 );
 CREATE INDEX IF NOT EXISTS signals_post ON signals(post_uid);
+CREATE TABLE IF NOT EXISTS trades (
+    uid TEXT PRIMARY KEY, investor TEXT NOT NULL, traded TEXT NOT NULL, filed TEXT NOT NULL,
+    side TEXT NOT NULL, form TEXT NOT NULL, ticker TEXT, issuer TEXT, shares REAL, price REAL,
+    amount_text TEXT, url TEXT
+);
+CREATE INDEX IF NOT EXISTS trades_traded ON trades(traded);
+CREATE TABLE IF NOT EXISTS prices (
+    ticker TEXT NOT NULL, day TEXT NOT NULL, close REAL NOT NULL, PRIMARY KEY (ticker, day)
+);
 """
 
 
@@ -85,6 +94,41 @@ class Store:
         rows = self.db.execute("SELECT ticker, stance, confidence, rationale, sector FROM signals"
                                " WHERE post_uid = ?", (post.uid,)).fetchall()
         return [Signal(r[0], Stance(r[1]), r[2], r[3], post, r[4] or "other") for r in rows]
+
+    # ------------------------------------------------------------- trades
+    def add_trades(self, trades: Iterable[Trade]) -> int:
+        cur = self.db.executemany(
+            "INSERT OR IGNORE INTO trades VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            [(t.uid, t.investor_key, t.traded.isoformat(), t.filed.isoformat(), t.side, t.form,
+              t.ticker, t.issuer, t.shares, t.price, t.amount_text, t.url) for t in trades])
+        self.db.commit()
+        return cur.rowcount
+
+    def trades_between(self, start: date, end: date, investor: str | None = None,
+                       ticker: str | None = None, by: str = "traded") -> list[Trade]:
+        """Trades whose ``by`` date ("traded" or "filed") falls in [start, end]."""
+        col = "filed" if by == "filed" else "traded"
+        q = f"SELECT * FROM trades WHERE {col} >= ? AND {col} <= ?"
+        args: list = [start.isoformat(), end.isoformat()]
+        if investor:
+            q += " AND investor = ?"
+            args.append(investor)
+        if ticker:
+            q += " AND ticker = ?"
+            args.append(ticker)
+        return [Trade(r[1], date.fromisoformat(r[2]), date.fromisoformat(r[3]), r[4], r[5], r[6],
+                      r[7] or "", r[8], r[9], r[10] or "", r[11])
+                for r in self.db.execute(q + " ORDER BY traded DESC, filed DESC", args)]
+
+    # ------------------------------------------------------------- prices
+    def add_prices(self, ticker: str, rows: Iterable[tuple[date, float]]) -> None:
+        self.db.executemany("INSERT OR REPLACE INTO prices VALUES (?,?,?)",
+                            [(ticker, d.isoformat(), c) for d, c in rows])
+        self.db.commit()
+
+    def prices(self, ticker: str) -> list[tuple[date, float]]:
+        return [(date.fromisoformat(d), c) for d, c in self.db.execute(
+            "SELECT day, close FROM prices WHERE ticker = ? ORDER BY day", (ticker,))]
 
     @staticmethod
     def _post(r) -> Post:

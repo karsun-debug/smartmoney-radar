@@ -93,7 +93,8 @@ EDGAR 規範：User-Agent 必須帶聯絡資訊、每秒 ≤ 10 次請求。
 
 - **MVP**：CLI、13F 比較、貼文分析、言行報告、離線測試。
 - **v0.2（本次）**：自動抓取發文與產業新聞、SQLite 儲存、產業熱度、共識標的、摘要報告。
-- **v0.2.x**：Form 4 / 13D 解析，縮短「行」的落後時間；持倉歷史也存進 SQLite。
+- **v0.3（本次）**：LINE 推播、網頁儀表板、Form 4 / 13D/G / 國會交易「即時對帳單」、喊單勝率、個股頁、OpenFIGI。
+- **之後**：13F 持倉歷史存庫（看多季趨勢）、ARK 每日交易檔、Saylor 的 8-K 比特幣購買解析、X 貼文截圖/圖表辨識。
 - **v0.3**：排程（cron / GitHub Actions），新申報或新貼文時推播（LINE / Telegram / Email）。
 - **v0.4**：網頁儀表板 —— 大神共識熱力圖（多人同時加碼的標的）、個人言行一致率排行、申報後股價表現回測。
 - **v0.5**：訪談影片自動轉逐字稿；用 Claude 摘要致股東信每段觀點並標出處。
@@ -105,3 +106,32 @@ EDGAR 規範：User-Agent 必須帶聯絡資訊、每秒 ≤ 10 次請求。
 - 季對季只看到「淨變化」，看不到季中來回操作。
 - 貼文觀點可能是說書、反串或替持倉造勢，因此「言行不一」本身就是有價值的訊號。
 - 抓取 X 等平台要遵守其服務條款；建議用官方 API 或手動匯出 JSON。
+
+
+## 7. 與 GitHub 同類專案比較（2026-11 調查）
+
+| 專案 | 做什麼 | 我們借鏡的地方 |
+|---|---|---|
+| [dokson/hedge-fund-tracker](https://github.com/dokson/hedge-fund-tracker) | 13F + 13D/G + Form 4 合併、React 網頁、GitHub Pages、AI 選股 | 不只看 13F：加入 **Form 4 / 13D/G** 做「即時對帳單」；CUSIP→代號用 **OpenFIGI** 備援；每檔個股一頁 |
+| [LuxAlgo/market-trackers](https://github.com/LuxAlgo/market-trackers) | 國會交易、內部人、13F 等 18 種公開資料，每列附原始文件連結，CC0 每日資料包 | **國會議員交易**（直接讀它的 CC0 資料包）；每筆交易都附 **原始申報連結** |
+| [StephanAkkerman/fintwit-bot](https://github.com/StephanAkkerman/fintwit-bot) | 追蹤 X 財經推文、情緒分析、熱門代號，推到 Discord | 社群貼文 → 情緒 → 推播的流程（我們用 Claude + LINE） |
+| [wescules/insider-trading-analyzer](https://github.com/wescules/insider-trading-analyzer) | Form 4 篩選、回測內部人買進後的報酬 | **喊單後 30/90 天報酬與勝率** |
+
+SpiderHead 的定位差異：其他專案只看「申報」或只看「貼文」，我們把兩者接起來——
+**誰在網路上喊了什麼 → 他實際申報買賣了什麼 → 喊完之後股價怎麼走**。
+
+### 即時對帳單的來源與時效
+
+| 來源 | 誰適用 | 時效 |
+|---|---|---|
+| Form 4 | 持股 >10% 或公司內部人（例：Berkshire 買 OXY） | 交易後 2 個工作日 |
+| Schedule 13D/G | 持股跨過 5%（例：Pershing Square、Third Point 的維權持股） | 13D 5 個工作日 |
+| 國會交易申報（PTR） | 國會議員與配偶（例：Pelosi） | 45 天內 |
+| 13F | 管理資產 > 1 億美元的機構 | 季末後 45 天 |
+
+### 喊單勝率的算法
+
+- 只算**本人發言**、可信度 ≥ 0.5、明確看多或看空**個股**的發言；同一人同一天同一檔只算一次。
+- 進場價 = 發言當日（或下一個交易日）收盤價；30 / 90 天後收盤價比較。
+- 看多後上漲、看空後下跌算「對」；平均報酬依方向調整。
+- 未計股利、交易成本；發言未滿天數不計入。股價來自 Stooq 免費日線。

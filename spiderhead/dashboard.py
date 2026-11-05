@@ -12,8 +12,10 @@ from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from .consistency import TradeCheck, check_trades
 from .digest import build_digest, investor_profile, sector_series
-from .models import ChangeType, ConsistencyItem, Investor, PositionChange, Post, Signal, Verdict
+from .performance import CallResult, PriceBook, Scorecard, score_calls, scorecards
+from .models import ChangeType, ConsistencyItem, Investor, PositionChange, Post, Signal, Trade, Verdict
 from .sectors import SECTORS, signal_label
 from .store import Store, window
 
@@ -25,7 +27,11 @@ CHANGE = {ChangeType.NEW: "新建倉", ChangeType.ADD: "加碼", ChangeType.TRIM
           ChangeType.EXIT: "清倉", ChangeType.HOLD: "不變"}
 VERDICT = {Verdict.CONSISTENT: ("✓", "說到做到", "bull"), Verdict.CONTRADICTS: ("!", "言行不一", "bear"),
            Verdict.HELD: ("–", "持有未動", "neutral"), Verdict.NOT_IN_13F: ("?", "13F 查無", "neutral")}
-PROOF = {"13F": "13F 季報", "13F+daily": "13F + 每日交易", "8-K": "8-K 公告"}
+PROOF = {"13F": "13F 季報", "13F+daily": "13F + 每日交易", "8-K": "8-K 公告",
+         "STOCK Act": "國會交易申報"}
+SIDE = {"buy": ("▲", "買進", "bull"), "sell": ("▼", "賣出", "bear"),
+        "stake": ("◆", "持股逾 5%", "neutral"), "exchange": ("●", "交換", "neutral")}
+FORM_LABEL = {"4": "Form 4", "4/A": "Form 4/A", "PTR": "國會申報"}
 
 CSS = """
 :root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink-2:#52514e;
@@ -124,13 +130,14 @@ def _labels(buckets: Sequence[date], step: int, end: date | None = None) -> list
     return [f"{b:%m/%d}–{min(b + timedelta(days=step - 1), end):%m/%d}" for b in buckets]
 
 
-def line_chart(labels: list[str], values: list[int], vmax: int, height: int = 64,
-               unit: str = " 則") -> str:
+def line_chart(labels: list[str], values: list[float], vmax: float, height: int = 64,
+               unit: str = " 則", vmin: float = 0) -> str:
     """Single-series area/line with a crosshair; y scale shared via ``vmax``."""
     n = len(values)
-    vmax = max(vmax, 1)
+    vmax = max(vmax, max(values, default=0), vmin + 1e-9, 1 if vmin == 0 else vmin)
+    span = (vmax - vmin) or 1
     xs = [i / (n - 1) * 100 if n > 1 else 50 for i in range(n)]
-    ys = [height - v / vmax * (height - 4) for v in values]
+    ys = [height - (v - vmin) / span * (height - 4) for v in values]
     pts = " ".join(f"{x:.2f},{y:.2f}" for x, y in zip(xs, ys))
     area = f"0,{height} {pts} 100,{height}"
     return (f'<div class="chart" data-labels="{esc(json.dumps(labels, ensure_ascii=False))}" '
@@ -192,8 +199,127 @@ def _mood(sentiment: float) -> str:
     return _badge("neutral", f"中性 {sentiment:+.2f}")
 
 
+def _tick(t: str | None, root: str) -> str:
+    if not t:
+        return "—"
+    return f'<a href="{root}ticker/{esc(_slug(t))}.html"><strong>{esc(t)}</strong></a>'
+
+
+def _slug(t: str) -> str:
+    return "".join(c if c.isalnum() or c in ".-" else "_" for c in t.upper())
+
+
+def _pct(v: float | None) -> str:
+    return "—" if v is None else f"{v:+.1f}%"
+
+
+def trades_table(trades: list[Trade], names: dict[str, str], root: str, show_who: bool = True,
+                 limit: int = 30) -> str:
+    if not trades:
+        return '<p class="empty">這段期間沒有新的申報交易。</p>'
+    rows = []
+    for t in trades[:limit]:
+        icon, label, cls = SIDE.get(t.side, ("●", t.side, "neutral"))
+        size = t.amount_text or (f"{t.shares:,.0f} 股" if t.shares else "")
+        if t.value_usd:
+            size += f" · ${t.value_usd / 1e6:,.1f}M"
+        form = FORM_LABEL.get(t.form, t.form)
+        src = f'<a href="{esc(t.url)}" rel="noopener" target="_blank">{esc(form)}</a>' if t.url else esc(form)
+        who = f'<td><a href="{root}investor/{esc(t.investor_key)}.html">{esc(names.get(t.investor_key, t.investor_key))}</a></td>' if show_who else ""
+        rows.append(f'<tr><td>{t.traded}</td>{who}<td><span class="badge {cls}"><span class="i">{icon}</span>{label}</span></td>'
+                    f'<td>{_tick(t.ticker, root)}<div class="sub">{esc(t.issuer[:60])}</div></td>'
+                    f'<td>{esc(size)}</td><td>{src}<div class="sub">申報 {t.filed}</div></td></tr>')
+    head = "<th>交易日</th>" + ("<th>誰</th>" if show_who else "") + "<th>動作</th><th>標的</th><th>規模</th><th>來源</th>"
+    return f'<div class="tablewrap"><table><tr>{head}</tr>{"".join(rows)}</table></div>'
+
+
+def scoreboard_table(calls: list[CallResult], names: dict[str, str],
+                     horizons: tuple[int, ...] = (30, 90)) -> str:
+    cards = {h: scorecards(calls, h) for h in horizons}
+    investors = sorted({k for c in cards.values() for k in c},
+                       key=lambda k: (-(cards[horizons[-1]][k].hit_rate or -1),
+                                      -(cards[horizons[0]][k].hit_rate or -1)))
+    if not investors:
+        return '<p class="empty">還沒有可評分的喊單（需要本人發言＋股價資料）。</p>'
+
+    def cell(c: Scorecard) -> str:
+        if not c.scored:
+            return '<td class="num">—</td><td class="num">—</td>'
+        return (f'<td class="num">{c.hit_rate * 100:.0f}%<div class="sub">{c.hits}/{c.scored}</div></td>'
+                f'<td class="num">{_pct(c.avg_return)}</td>')
+    rows = "".join(
+        f'<tr><td><a href="investor/{esc(k)}.html">{esc(names.get(k, k))}</a></td>'
+        f'<td class="num">{cards[horizons[0]][k].calls}</td>'
+        + "".join(cell(cards[h][k]) for h in horizons) + "</tr>" for k in investors)
+    head = "".join(f'<th class="num">{h} 天勝率</th><th class="num">{h} 天平均報酬</th>' for h in horizons)
+    return (f'<div class="tablewrap"><table><tr><th>大神</th><th class="num">喊單數</th>{head}</tr>'
+            f'{rows}</table></div>'
+            f'<p class="sub">「喊單」＝本人發言中明確看多/看空某檔個股；看多後上漲、看空後下跌算對。'
+            f'報酬以發言當日收盤為基準並依方向調整（看空時下跌記為正），未計股利與交易成本；'
+            f'發言未滿該天數的不計入。</p>')
+
+
+def calls_table(results: list[CallResult], root: str, horizons=(30, 90)) -> str:
+    if not results:
+        return '<p class="empty">還沒有可評分的喊單。</p>'
+    rows = []
+    for r in sorted(results, key=lambda r: r.signal.post.published, reverse=True)[:40]:
+        cells = ""
+        for h in horizons:
+            hit = r.hit(h)
+            mark = "" if hit is None else (" ✓" if hit else " ✗")
+            cells += f'<td class="num">{_pct(r.returns.get(h))}{mark}</td>'
+        rows.append(f'<tr><td>{r.signal.post.published}</td><td>{_tick(r.signal.ticker, root)}</td>'
+                    f'<td>{_badge(r.signal.stance.value)}</td><td class="num">{r.entry:,.2f}</td>{cells}</tr>')
+    hh = "".join(f'<th class="num">{h} 天後</th>' for h in horizons)
+    return (f'<div class="tablewrap"><table><tr><th>日期</th><th>標的</th><th>喊單</th>'
+            f'<th class="num">當日價</th>{hh}</tr>{"".join(rows)}</table></div>')
+
+
+def tradecheck_table(items: list[TradeCheck], root: str) -> str:
+    if not items:
+        return '<p class="empty">發言前後 90 天內沒有對應的申報交易。</p>'
+    rows = "".join(
+        f'<tr><td>{it.signal.post.published}</td><td>{_tick(it.signal.ticker, root)}</td>'
+        f'<td>{_badge(it.signal.stance.value)}</td>'
+        f'<td>{SIDE.get(it.trade.side, ("", it.trade.side, ""))[1]} {it.trade.traded}'
+        f'<div class="sub">發言{"後" if it.days_after >= 0 else "前"} {abs(it.days_after)} 天</div></td>'
+        f'<td><span class="badge {VERDICT[it.verdict][2]}"><span class="i">{VERDICT[it.verdict][0]}</span>'
+        f'{VERDICT[it.verdict][1]}</span></td></tr>' for it in items)
+    return (f'<div class="tablewrap"><table><tr><th>發言日</th><th>標的</th><th>公開看法</th>'
+            f'<th>實際交易</th><th>判定</th></tr>{rows}</table></div>')
+
+
+def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
+                  prices: PriceBook | None) -> str:
+    start, end = window(days)
+    sigs = [s for s in store.signals_between(start, end) if s.ticker == ticker]
+    trades = store.trades_between(start - timedelta(days=90), end, ticker=ticker)
+    rows = sorted(sigs, key=lambda s: s.post.published, reverse=True)
+    talk = "".join(
+        f'<tr><td>{s.post.published}</td><td><a href="../investor/{esc(s.post.investor_key)}.html">'
+        f'{esc(names.get(s.post.investor_key, s.post.investor_key))}</a></td><td>{_badge(s.stance.value)}</td>'
+        f'<td>{esc(s.rationale[:120])}</td></tr>' for s in rows[:50])
+    talk = (f'<div class="tablewrap"><table><tr><th>日期</th><th>誰</th><th>看法</th><th>依據</th></tr>{talk}</table></div>'
+            if rows else '<p class="empty">期間內沒有大神提到。</p>')
+    chart = ""
+    if prices is not None:
+        series = [(d, c) for d, c in prices.series(ticker) if start <= d <= end]
+        if len(series) > 1:
+            chart = (f'<h2>股價（收盤）</h2><div class="card">'
+                     + line_chart([f"{d:%m/%d}" for d, _ in series], [round(c, 2) for _, c in series],
+                                  0, height=120, unit=" 美元", vmin=min(c for _, c in series)) + "</div>")
+    bulls = sum(1 for s in rows if s.stance.value == "bullish")
+    bears = sum(1 for s in rows if s.stance.value == "bearish")
+    body = (f'<p class="sub"><a href="../index.html">← 總覽</a></p><header class="top"><h1>{esc(ticker)}</h1>'
+            f'<span class="sub">{days} 天內被提到 {len(rows)} 次 · ▲ {bulls} / ▼ {bears}</span></header>'
+            f'{chart}<h2>誰在談</h2>{talk}<h2>大神的實際交易（對帳單）</h2>'
+            f'{trades_table(trades, names, "../")}')
+    return _page(f"{ticker} · SpiderHead", body, "../")
+
+
 def render_index(store: Store, investors: dict[str, Investor], days: int, step: int,
-                 recent_days: int = 7) -> str:
+                 recent_days: int = 7, calls: list[CallResult] | None = None) -> str:
     start, end = window(days)
     buckets, series = sector_series(store.signals_between(start, end), start, end, step)
     labels = _labels(buckets, step, end)
@@ -259,13 +385,17 @@ def render_index(store: Store, investors: dict[str, Investor], days: int, step: 
             f'<span class="sub">資料期間 {start} ～ {end}</span></header>{tiles}'
             f'<h2>產業熱度變化（每{"天" if step == 1 else f" {step} 天"}被提及的則數）</h2>{heat}{heat_table}'
             f'<h2>多位大神同時在談（近 {recent_days} 天）</h2>{cons}'
+            f'<h2>最新對帳單（近 30 天申報的實際交易）</h2>'
+            f'{trades_table(store.trades_between(end - timedelta(days=29), end, by="filed"), names, "", limit=20)}'
+            f'<h2>喊單勝率排行</h2>{scoreboard_table(calls or [], names)}'
             f'<h2>大神</h2><div class="grid">{"".join(inv_cards)}</div>'
             f'<h2>最新動態</h2>{_feed_html(recent.feed, names, "")}')
     return _page("SpiderHead 大神追蹤", body, "")
 
 
 def render_investor(store: Store, inv: Investor, names: dict[str, str], days: int, step: int,
-                    holdings: tuple[str, list[PositionChange], list[ConsistencyItem]] | None = None) -> str:
+                    holdings: tuple[str, list[PositionChange], list[ConsistencyItem]] | None = None,
+                    calls: list[CallResult] | None = None) -> str:
     start, end = window(days)
     prof = investor_profile(store, inv, start, end, step)
     buckets, activity = prof.activity
@@ -287,7 +417,7 @@ def render_investor(store: Store, inv: Investor, names: dict[str, str], days: in
 
     tick_rows = sorted(prof.tickers.items(), key=lambda kv: -sum(kv[1].values()))
     tick_html = ("".join(
-        f'<tr><td><strong>{esc(t)}</strong></td><td class="num">{c["bullish"]}</td>'
+        f'<tr><td>{_tick(t, "../")}</td><td class="num">{c["bullish"]}</td>'
         f'<td class="num">{c["bearish"]}</td><td class="num">{c["neutral"]}</td></tr>' for t, c in tick_rows[:20]))
     tick_html = (f'<div class="tablewrap"><table><tr><th>標的</th><th class="num">▲ 看多</th>'
                  f'<th class="num">▼ 看空</th><th class="num">● 中性</th></tr>{tick_html}</table></div>'
@@ -318,9 +448,15 @@ def render_investor(store: Store, inv: Investor, names: dict[str, str], days: in
     else:
         h13 = f'<p class="empty">此人以 {esc(PROOF.get(inv.proof, inv.proof))} 驗證，尚未支援自動比對。</p>'
 
+    trades = store.trades_between(start - timedelta(days=90), end, inv.key)
+    trades_html = trades_table(trades, names, "../", show_who=False)
+    own_sigs = [sg for p, sigs in prof.posts if p.kind == "own" for sg in sigs]
+    checks = check_trades(own_sigs, trades)
+    my_calls = [c for c in (calls or []) if c.signal.post.investor_key == inv.key]
+
     body = (f'<p class="sub"><a href="../index.html">← 全部大神</a></p>'
-            f'<header class="top"><h1>{esc(inv.name)}</h1><span class="sub">{esc(inv.fund)} · '
-            f'{" · ".join(links)}</span></header>'
+            f'<header class="top"><h1>{esc(inv.name)}</h1><span class="sub">'
+            f'{" · ".join([esc(inv.fund), *links])}</span></header>'
             f'<p class="note">{esc(inv.note)}</p>'
             f'<div class="tiles"><div class="tile"><div class="v">{len(prof.posts)}</div><div class="l">{days} 天發文 / 報導</div></div>'
             f'<div class="tile"><div class="v">{own}</div><div class="l">本人發言</div></div>'
@@ -329,24 +465,39 @@ def render_investor(store: Store, inv: Investor, names: dict[str, str], days: in
             f'<h2>發文頻率</h2><div class="card">{bar_chart(_labels(buckets, step, end), activity)}</div>'
             f'<h2>最常談的產業</h2><div class="card">{sec_html}</div>'
             f'<h2>提到的個股</h2>{tick_html}'
-            f'<h2>實際持倉（對帳單）</h2>{h13}'
+            f'<h2>即時對帳單（Form 4 / 13D / 國會申報）</h2>{trades_html}'
+            f'<h2>言行一致：發言 vs 實際交易</h2>{tradecheck_table(checks, "../")}'
+            f'<h2>喊單成績</h2>{calls_table(my_calls, "../")}'
+            f'<h2>13F 季度持倉</h2>{h13}'
             f'<h2>發文紀錄</h2>{_feed_html(prof.posts, names, "../", limit=100, link_investor=False)}')
     return _page(f"{inv.name} · SpiderHead", body, "../")
 
 
 def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path,
                days: int = 90, step: int | None = None,
-               holdings: dict[str, tuple[str, list[PositionChange], list[ConsistencyItem]]] | None = None) -> Path:
+               holdings: dict[str, tuple[str, list[PositionChange], list[ConsistencyItem]]] | None = None,
+               prices: PriceBook | None = None) -> Path:
     out = Path(out_dir)
     (out / "assets").mkdir(parents=True, exist_ok=True)
     (out / "investor").mkdir(exist_ok=True)
     step = step or (1 if days <= 31 else 7)
     (out / "assets" / "style.css").write_text(CSS, encoding="utf-8")
     (out / "assets" / "app.js").write_text(JS, encoding="utf-8")
-    (out / "index.html").write_text(render_index(store, investors, days, step), encoding="utf-8")
+    (out / "ticker").mkdir(exist_ok=True)
     from .digest import display_names
     names = display_names(investors)
+    start, end = window(days)
+    # Score calls over a longer look-back so 90-day outcomes exist.
+    calls = score_calls(store.signals_between(start - timedelta(days=270), end), prices) if prices else []
+    (out / "index.html").write_text(render_index(store, investors, days, step, calls=calls),
+                                    encoding="utf-8")
     for inv in investors.values():
-        page = render_investor(store, inv, names, days, step, (holdings or {}).get(inv.key))
+        page = render_investor(store, inv, names, days, step, (holdings or {}).get(inv.key), calls)
         (out / "investor" / f"{inv.key}.html").write_text(page, encoding="utf-8")
+    tickers = {s.ticker for s in store.signals_between(start, end)
+               if not s.ticker.startswith(("SECTOR:", "MACRO:"))}
+    tickers |= {t.ticker for t in store.trades_between(start - timedelta(days=90), end) if t.ticker}
+    for t in sorted(tickers):
+        (out / "ticker" / f"{_slug(t)}.html").write_text(
+            render_ticker(store, t, names, days, prices), encoding="utf-8")
     return out / "index.html"

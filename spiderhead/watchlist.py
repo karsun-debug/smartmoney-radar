@@ -41,6 +41,10 @@ DEFAULT_WATCHLIST: list[Investor] = [
     Investor("saylor", "Michael Saylor", "Strategy Inc (MicroStrategy)", "0001050446",
              {"x": "saylor"}, "8-K",
              "幾乎每週在 X 預告買比特幣，並以 8-K 申報實際買入量；8-K 自動比對尚未實作。"),
+    Investor("pelosi", "Nancy Pelosi", "美國眾議員（前議長）", "",
+             {"congress": "Pelosi"}, "STOCK Act",
+             "網路上被追蹤最多的「國會交易」，多為配偶 Paul Pelosi 的交易；依 STOCK Act 須在 45 天內申報。"
+             "已宣布不再競選連任，任期至 2027 年 1 月。"),
 ]
 
 
