@@ -98,7 +98,8 @@ def parse_congress_rows(rows: Iterable[dict], members: dict[str, str],
     """Convert LuxAlgo congress-trade rows for watched members into Trades.
 
     ``members`` maps a case-insensitive substring of the member's name
-    (e.g. "pelosi") to our investor key.
+    (e.g. "pelosi") to our investor key. ``since`` applies to the *filing*
+    date: trades may be disclosed up to 45 days after they happen.
     """
     out = []
     for r in rows:
@@ -107,7 +108,8 @@ def parse_congress_rows(rows: Iterable[dict], members: dict[str, str],
         if key is None:
             continue
         traded = date.fromisoformat(r["transactedAt"])
-        if since and traded < since:
+        filed = date.fromisoformat(r["filedAt"])
+        if since and filed < since:
             continue
         rng = r.get("amountRange") or {}
         owner = r.get("owner")
@@ -118,7 +120,7 @@ def parse_congress_rows(rows: Iterable[dict], members: dict[str, str],
         if detail and kind:                      # options: keep strike / expiry note
             text += f"：{detail}"
         out.append(Trade(
-            key, traded, date.fromisoformat(r["filedAt"]), r["side"], "PTR",
+            key, traded, filed, r["side"], "PTR",
             (r.get("ticker") or None) and r["ticker"].upper(), name,
             None if kind else shares, None, text, (r.get("provenance") or {}).get("sourceUrl")))
     return out

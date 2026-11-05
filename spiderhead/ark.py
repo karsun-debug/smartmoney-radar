@@ -72,6 +72,8 @@ def parse_ark_csv(text: str) -> tuple[date | None, list[ArkHolding]]:
         company = r.get("company", "")
         if not company or shares <= 0:
             continue                      # disclaimers, cash lines without shares
+        if not r.get("ticker") and not r.get("cusip"):
+            continue                      # cash / money-market sweep: not a stock position
         day = day or _date(r.get("date", ""))
         value = _num(r.get("market value ($)") or r.get("market value($)") or r.get("market value"))
         out.append(ArkHolding(r.get("ticker", "").upper().split(" ")[0], company,

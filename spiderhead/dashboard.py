@@ -109,6 +109,13 @@ document.querySelectorAll('[data-tip]').forEach(el=>{
 """
 
 
+def safe_url(url: str | None) -> str | None:
+    """Only http(s) links from feeds become clickable (blocks javascript:/data: URLs)."""
+    if url and url.strip().lower().startswith(("http://", "https://")):
+        return url.strip()
+    return None
+
+
 def _page(title: str, body: str, root: str) -> str:
     return (f'<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -183,7 +190,8 @@ def _feed_html(rows: list[tuple[Post, list[Signal]]], names: dict[str, str], roo
             who = f'<a href="{root}investor/{esc(post.investor_key)}.html">{who}</a>'
         src = ("本人發言" if post.kind == "own" else
                "報導·引述本人" if any(s.attributed for s in sigs) else "相關報導")
-        link = f' · <a href="{esc(post.url)}" rel="noopener" target="_blank">原文</a>' if post.url else ""
+        url = safe_url(post.url)
+        link = f' · <a href="{esc(url)}" rel="noopener" target="_blank">原文</a>' if url else ""
         badges = " ".join(_badge(s.stance.value, signal_label(s.ticker, s.sector)) for s in sigs[:6])
         text = post.text if len(post.text) <= 400 else post.text[:399] + "…"
         items.append(f'<li><div class="sub"><span class="who">{who}</span> · {post.published} · '
@@ -226,7 +234,8 @@ def trades_table(trades: list[Trade], names: dict[str, str], root: str, show_who
         if t.value_usd:
             size += f" · ${t.value_usd / 1e6:,.1f}M"
         form = FORM_LABEL.get(t.form, t.form)
-        src = f'<a href="{esc(t.url)}" rel="noopener" target="_blank">{esc(form)}</a>' if t.url else esc(form)
+        url = safe_url(t.url)
+        src = f'<a href="{esc(url)}" rel="noopener" target="_blank">{esc(form)}</a>' if url else esc(form)
         who = f'<td><a href="{root}investor/{esc(t.investor_key)}.html">{esc(names.get(t.investor_key, t.investor_key))}</a></td>' if show_who else ""
         rows.append(f'<tr><td>{t.traded}</td>{who}<td><span class="badge {cls}"><span class="i">{icon}</span>{label}</span></td>'
                     f'<td>{_tick(t.ticker, root)}<div class="sub">{esc(t.issuer[:60])}</div></td>'

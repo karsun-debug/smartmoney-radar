@@ -44,18 +44,22 @@ def _digest_markdown(store, investors, days: int, investor: str | None = None) -
     return f"# Smartmoney Radar 動態摘要（{d.start} ～ {d.end}）\n\n{feed}\n\n{trend}\n"
 
 
-def _changes_from_edgar(investor, resolver_from_sec: bool):
+def _sec_resolver(client) -> TickerResolver:
+    from .holdings import OpenFigi
+    return TickerResolver(name_map=client.company_name_map(), figi=OpenFigi())
+
+
+def _changes_from_edgar(investor, client=None, resolver: TickerResolver | None = None):
+    """Latest 13F vs the previous quarter. Pass ``client``/``resolver`` to reuse them."""
     from .edgar import EdgarClient
-    client = EdgarClient()
+    client = client or EdgarClient()
     filings = client.latest_13f_per_quarter(investor.cik, quarters=2)
     if len(filings) < 2:
-        raise SystemExit(f"{investor.key}: fewer than two 13F filings found")
+        raise ValueError(f"{investor.key}: fewer than two 13F filings found")
     curr_f, prev_f = filings
     curr = parse_infotable(client.fetch_infotable_xml(curr_f))
     prev = parse_infotable(client.fetch_infotable_xml(prev_f))
-    from .holdings import OpenFigi
-    resolver = TickerResolver(name_map=client.company_name_map() if resolver_from_sec else None,
-                              figi=OpenFigi())
+    resolver = resolver or _sec_resolver(client)
     return str(curr_f.report_date), diff_holdings(prev, curr, resolver)
 
 
@@ -198,7 +202,11 @@ def main(argv: list[str] | None = None) -> int:
         quarter, changes = _changes_from_files(args.prev_xml, args.curr_xml, args.quarter,
                                                args.tickers)
     else:
-        quarter, changes = _changes_from_edgar(inv, resolver_from_sec=True)
+        try:
+            quarter, changes = _changes_from_edgar(inv)
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 1
 
     if args.cmd == "holdings":
         print(holdings_markdown(inv, quarter, changes, top=args.top))
@@ -301,14 +309,20 @@ def _store_commands(args, investors) -> int:
 
 def _holdings_for_dashboard(store, investors):
     """Latest 13F diff + say/do check for every 13F filer; failures are skipped."""
-    from .store import window
+    from .edgar import EdgarClient
     out = {}
     analyzer = KeywordAnalyzer(names=_name_map(investors))
+    try:
+        client = EdgarClient()
+        resolver = _sec_resolver(client)          # one download, shared by every investor
+    except Exception as exc:
+        print(f"warning: 13F skipped: {exc}", file=sys.stderr)
+        return out
     for inv in investors.values():
         if not inv.files_13f:
             continue
         try:
-            quarter, changes = _changes_from_edgar(inv, resolver_from_sec=True)
+            quarter, changes = _changes_from_edgar(inv, client, resolver)
         except Exception as exc:
             print(f"warning: 13F {inv.key}: {exc}", file=sys.stderr)
             continue

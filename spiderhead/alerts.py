@@ -20,6 +20,7 @@ ICON = {"bullish": "🟢", "bearish": "🔴", "neutral": "⚪"}
 SIDE = {"buy": "🟢買進", "sell": "🔴賣出", "stake": "🔷持股逾5%", "exchange": "⚪交換",
         "report": "📄提交申報"}
 FORM = {"4": "Form 4", "PTR": "國會申報", "ARK daily": "ARK 每日持股"}
+INIT_MARK = "__alerts_initialized__"   # recorded once the first (silent) run has happened
 
 
 @dataclass
@@ -83,13 +84,15 @@ def run_alerts(store: Store, investors: dict[str, Investor], send, dry_run: bool
                backfill: bool = False, **kw) -> tuple[int, str]:
     """Send pending alerts. Returns (number of items alerted, message text)."""
     pending = find_pending(store, investors, **kw)
-    if store.alerts_count() == 0 and not backfill:
-        store.mark_alerted(pending.keys())     # first run: remember, don't flood
+    initialized = bool(store.alerted([INIT_MARK])) or store.alerts_count() > 0
+    if not initialized and not backfill:
+        if not dry_run:                        # first run: remember history, don't flood
+            store.mark_alerted(pending.keys() + [(INIT_MARK, "meta")])
         return 0, ""
     if not pending:
         return 0, ""
     text = format_alert(pending, investors)
     if not dry_run:
         send(text)
-        store.mark_alerted(pending.keys())
+        store.mark_alerted(pending.keys() + [(INIT_MARK, "meta")])
     return len(pending.keys()), text

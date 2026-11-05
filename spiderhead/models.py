@@ -149,7 +149,16 @@ class Trade:
     @property
     def uid(self) -> str:
         import hashlib
-        basis = f"{self.investor_key}|{self.form}|{self.url}|{self.traded}|{self.issuer}|{self.side}|{self.shares}"
+        if self.form == "PTR":
+            # Same row parsed by the House Clerk reader or the LuxAlgo fallback must
+            # collide: key on what both report identically.
+            what = (self.ticker or " ".join(self.issuer.upper().split())[:40])
+            amount = self.amount_text.split("（")[0].strip()
+            option = "選擇權" in self.amount_text
+            basis = f"{self.investor_key}|PTR|{self.url}|{self.traded}|{what}|{self.side}|{amount}|{option}"
+        else:
+            basis = (f"{self.investor_key}|{self.form}|{self.url}|{self.traded}|{self.issuer}"
+                     f"|{self.side}|{self.shares}")
         return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
 
     @property

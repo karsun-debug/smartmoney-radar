@@ -13,8 +13,6 @@ FAMILY_NAMES = {
     "sec": "SEC 申報（Form 4 / 13D / 8-K）", "house": "眾議院申報", "congress": "國會交易（LuxAlgo）",
     "ark": "ARK 每日持股", "prices": "股價",
 }
-# Sources that legitimately go quiet for a while (no filings that week).
-QUIET_OK_DAYS = {"sec": 30, "house": 30, "congress": 30, "ark": 4, "x": 7, "rss": 14}
 
 
 @dataclass(frozen=True)

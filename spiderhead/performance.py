@@ -17,6 +17,7 @@ from .models import Signal, Stance
 STOOQ_URL = "https://stooq.com/q/d/l/?s={sym}&i=d"
 CRYPTO = {"BTC": "btcusd", "ETH": "ethusd", "SOL": "solusd"}   # Stooq crypto symbols
 HORIZONS = (30, 90)
+ECHO_DAYS = 7
 
 
 def parse_stooq_csv(text: str) -> list[tuple[date, float]]:
@@ -44,10 +45,13 @@ class PriceBook:
         if stale and self.get is not None and len(self.errors) < 3:   # stop early when offline
             sym = CRYPTO.get(ticker.upper()) or ticker.lower().replace(".", "-") + ".us"
             try:
-                fresh = parse_stooq_csv(self.get(STOOQ_URL.format(sym=sym), {}).decode("utf-8", "replace"))
+                body = self.get(STOOQ_URL.format(sym=sym), {}).decode("utf-8", "replace")
+                fresh = parse_stooq_csv(body)
                 if fresh:
                     self.store.add_prices(ticker, fresh)
                     rows = self.store.prices(ticker)
+                else:
+                    self.errors.append(f"price {ticker}: no data ({' '.join(body.split())[:60]!r})")
             except Exception as exc:
                 self.errors.append(f"price {ticker}: {exc}")
         self._cache[ticker] = rows
@@ -74,17 +78,22 @@ class CallResult:
 
 def score_calls(signals: Iterable[Signal], prices: PriceBook,
                 horizons: tuple[int, ...] = HORIZONS) -> list[CallResult]:
-    """One result per (investor, ticker, day) directional call on a stock."""
-    seen, out = set(), []
-    for s in signals:
+    """One result per directional call on a stock.
+
+    The same call repeated (or echoed by several articles) within
+    ``ECHO_DAYS`` of the first mention counts once.
+    """
+    last: dict[tuple, date] = {}
+    out = []
+    for s in sorted(signals, key=lambda s: s.post.published):
         if s.stance is Stance.NEUTRAL or s.ticker.startswith(("SECTOR:", "MACRO:")):
             continue
         if not s.is_own_view or s.confidence < 0.5:
             continue
-        key = (s.post.investor_key, s.ticker, s.post.published)
-        if key in seen:
+        key = (s.post.investor_key, s.ticker, s.stance)
+        if key in last and (s.post.published - last[key]).days < ECHO_DAYS:
             continue
-        seen.add(key)
+        last[key] = s.post.published
         entry = prices.close_on_or_after(s.ticker, s.post.published)
         if entry is None:
             continue
