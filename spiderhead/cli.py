@@ -142,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--no-shorts", action="store_true", help="skip FINRA short-sale volume")
     f.add_argument("--no-buzz", action="store_true", help="skip Wikipedia pageviews")
     f.add_argument("--no-macro", action="store_true", help="skip FRED macro series")
+    f.add_argument("--no-banks", action="store_true", help="skip investment-bank rating changes")
 
     im = sub.add_parser("import", help="匯入手動整理的貼文 JSON/JSONL")
     im.add_argument("posts_file")
@@ -291,6 +292,14 @@ def _store_commands(args, investors) -> int:
         if args.cmd == "fetch" and not args.no_trades:
             trades = _collect_trades(investors, max(args.days, 30), store)
             print(f"對帳單：抓到 {len(trades)} 筆，新增 {store.add_trades(trades)} 筆")
+        if args.cmd == "fetch" and not args.no_banks:
+            from .banks import NameResolver, collect_bank_calls
+            from .health import HealthLog
+            from .sources import _requests_get
+            hl = HealthLog()
+            calls = collect_bank_calls(_requests_get, NameResolver(_sec_names()), health=hl)
+            store.log_results(hl.results)
+            print(f"投行評等：抓到 {len(calls)} 筆，新增 {store.add_bank_calls(calls)} 筆")
         if args.cmd == "fetch" and not args.no_macro:
             from .health import HealthLog
             from .macro import fetch_macro
@@ -385,6 +394,11 @@ def _store_commands(args, investors) -> int:
         from .dashboard import build_site
         if args.with_13f:
             _refresh_13f(store, investors)
+            from .banks import BANKS
+            called = {c.ticker for c in store.bank_calls(date.today() - timedelta(days=400), date.today())}
+            if called:
+                banks = {b.as_investor().key: b.as_investor() for b in BANKS if b.cik}
+                _refresh_13f(store, banks, keep={k: called for k in banks})
         prices = None
         if not args.no_prices:
             from .performance import PriceBook
@@ -413,7 +427,7 @@ def _store_commands(args, investors) -> int:
     return 0
 
 
-def _refresh_13f(store, investors, quarters: int = 4) -> None:
+def _refresh_13f(store, investors, quarters: int = 4, keep: dict[str, set[str]] | None = None) -> None:
     """Download the last few 13F quarters for every filer into the store.
 
     Quarters already stored with the same accession number are skipped, so a
@@ -426,20 +440,30 @@ def _refresh_13f(store, investors, quarters: int = 4) -> None:
     except Exception as exc:
         print(f"warning: 13F skipped: {exc}", file=sys.stderr)
         return
-    resolver, results = None, []
+    resolver, by_name, results = None, None, []
     for inv in investors.values():
         if not inv.files_13f:
             continue
         try:
             new = 0
-            for f in client.latest_13f_per_quarter(inv.cik, quarters=quarters):
+            wanted = (keep or {}).get(inv.key)
+            for f in client.latest_13f_per_quarter(inv.cik, quarters=2 if wanted is not None else quarters):
                 q = str(f.report_date)
                 if store.accession_13f(inv.key, q) == f.accession:
                     continue
-                if resolver is None:
-                    resolver = _sec_resolver(client)     # one download, shared by everyone
-                store.save_13f(inv.key, q, f.accession,
-                               parse_infotable(client.fetch_infotable_xml(f)), resolver, f.filing_date)
+                if wanted is not None:
+                    # Huge filers (banks): keep only stocks we follow, matched by issuer name.
+                    if by_name is None:
+                        by_name = TickerResolver(name_map=client.company_name_map())
+                    from .models import Holding
+                    holds = parse_infotable(client.fetch_infotable_xml(f),
+                                            keep=lambda n: by_name(Holding(n, "", "", 0, 0)) in wanted)
+                    store.save_13f(inv.key, q, f.accession, holds, by_name, f.filing_date)
+                else:
+                    if resolver is None:
+                        resolver = _sec_resolver(client)     # one download, shared by everyone
+                    store.save_13f(inv.key, q, f.accession,
+                                   parse_infotable(client.fetch_infotable_xml(f)), resolver, f.filing_date)
                 new += 1
             results.append(SourceResult("sec13f", inv.key, True, new))
         except Exception as exc:
@@ -507,3 +531,21 @@ def _broadcast(text: str) -> int:
         print(exc, file=sys.stderr)
         return 1
     return 0
+
+
+_SEC_NAMES: dict[str, str] | None = None
+
+
+def _sec_names() -> dict[str, str]:
+    """SEC issuer-name -> ticker map (empty without SPIDERHEAD_USER_AGENT or network)."""
+    global _SEC_NAMES
+    if _SEC_NAMES is None:
+        import os
+        _SEC_NAMES = {}
+        if os.environ.get("SPIDERHEAD_USER_AGENT"):
+            try:
+                from .edgar import EdgarClient
+                _SEC_NAMES = EdgarClient().company_name_map()
+            except Exception as exc:
+                print(f"warning: SEC name map: {exc}", file=sys.stderr)
+    return _SEC_NAMES

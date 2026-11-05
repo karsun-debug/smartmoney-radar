@@ -122,7 +122,8 @@ def safe_url(url: str | None) -> str | None:
     return None
 
 
-NAV = [("index.html", "總覽"), ("macro.html", "總經"), ("consensus.html", "大神共同持股"), ("clone.html", "跟單回測"),
+NAV = [("index.html", "總覽"), ("macro.html", "總經"), ("banks.html", "投行 vs 大神"),
+       ("consensus.html", "大神共同持股"), ("clone.html", "跟單回測"),
        ("insiders.html", "內部人群買"), ("activist.html", "維權持股"), ("retail.html", "散戶 vs 大神"),
        ("buzz.html", "聲量排行"), ("weekly.html", "週報")]
 
@@ -645,6 +646,129 @@ def render_macro(store: Store, names: dict[str, str]) -> str:
     return _page("總經 · Smartmoney Radar", body, "", "macro.html")
 
 
+ACTION_LABEL = {"upgrade": "升評", "downgrade": "降評", "initiate": "首次評等", "raise_pt": "調高目標價",
+                "cut_pt": "調降目標價", "reiterate": "維持評等"}
+
+
+def _bar(frac: float | None) -> str:
+    if frac is None:
+        return ""
+    return (f'<div class="track" style="height:6px;margin-top:4px;background:var(--grid);border-radius:3px">'
+            f'<div style="height:6px;border-radius:3px;background:var(--series);width:{max(0, min(1, frac)) * 100:.0f}%">'
+            f'</div></div>')
+
+
+def render_banks(store: Store, names: dict[str, str], prices: PriceBook | None, days: int = 365) -> str:
+    from .banks import BANK_BY_KEY, bank_scores, says_vs_holds, score_bank_calls
+    end = date.today()
+    calls = store.bank_calls(end - timedelta(days=days), end)
+    bname = lambda k: BANK_BY_KEY[k].name if k in BANK_BY_KEY else k  # noqa: E731
+    note = ('<p class="sub">投行評等來自免費新聞標題（自動解析升評、降評與目標價），'
+            '事後用股價驗證：方向正確率看 90 天後漲跌是否符合評等，超額報酬與 SPY 比較，'
+            '目標價達成率看一年內是否碰到目標價。</p>')
+    if not calls:
+        body = (f'<h1>投行 vs 大神</h1>{note}<p class="empty">還沒有投行評等資料，執行 '
+                f'<code>spiderhead fetch</code>。</p>')
+        return _page("投行 vs 大神 · Smartmoney Radar", body, "", "banks.html")
+    outcomes = score_bank_calls(calls, prices) if prices is not None else []
+    scores = bank_scores(outcomes)
+    rows = sorted(scores.values(), key=lambda s: -(s.hit_rate if s.hit_rate is not None else -1))
+    score_trs = "".join(
+        f'<tr><td>{esc(bname(s.bank))}</td><td class="num">{s.calls}</td>'
+        f'<td class="num">{"—" if s.hit_rate is None else f"{s.hit_rate * 100:.0f}%"}'
+        f'<div class="sub">{s.hits_90}/{s.scored_90}</div>{_bar(s.hit_rate)}</td>'
+        f'<td class="num">{_pct(s.avg_excess_90)}</td>'
+        f'<td class="num">{"—" if s.target_rate is None else f"{s.target_rate * 100:.0f}%"}'
+        f'<div class="sub">{s.targets_hit}/{s.targets_resolved}</div>{_bar(s.target_rate)}</td>'
+        f'<td class="num">{_pct(s.avg_upside)}</td></tr>' for s in rows)
+    score_html = (
+        '<div class="tablewrap"><table><tr><th>投行</th><th class="num">評等數</th>'
+        '<th class="num">90 天方向正確率</th><th class="num">平均超額報酬（vs SPY）</th>'
+        '<th class="num">目標價達成率</th><th class="num">喊出時的平均上檔空間</th></tr>'
+        + score_trs + '</table></div><p class="sub">「平均上檔空間」越大、達成率越低，代表目標價越樂觀。'
+        '需要股價資料（不要加 --no-prices）。</p>') if outcomes else '<p class="empty">需要股價資料才能驗證。</p>'
+
+    mism = says_vs_holds(store, calls)
+    chg = {"NEW": "新建倉", "ADD": "加碼", "TRIM": "減碼", "EXIT": "清倉"}
+    mism_html = ("".join(
+        f'<tr><td>{m.call.published}</td><td>{esc(bname(m.call.bank))}</td><td>{_tick(m.call.ticker, "")}</td>'
+        f'<td>{_badge(m.call.stance, ACTION_LABEL.get(m.call.action, m.call.action))}</td>'
+        f'<td>{esc(chg.get(m.change, m.change))}<div class="sub">{m.shares_before:,} → {m.shares_after:,} 股'
+        f'（{esc(m.quarter)}）</div></td></tr>' for m in mism))
+    mism_html = (f'<div class="tablewrap"><table><tr><th>評等日</th><th>投行</th><th>標的</th><th>研究報告說</th>'
+                 f'<th>同季 13F 實際</th></tr>{mism_html}</table></div>' if mism else
+                 '<p class="empty">目前沒有發現（或投行 13F 尚未下載：<code>spiderhead dashboard --with-13f</code>）。</p>')
+    caveat = ('<p class="sub">⚠️ 投行的 13F 混合了客戶資產、造市與資產管理部位，研究部門與交易部門依法分隔。'
+              '「說買卻在賣」值得留意，但<strong>不等於</strong>證明投行說謊或刻意出貨。</p>')
+
+    # Banks vs gurus on the same tickers (last 90 days).
+    recent = [c for c in calls if c.published >= end - timedelta(days=90) and c.stance != "neutral"]
+    guru_views: dict[str, dict[str, str]] = {}
+    for s in store.signals_between(end - timedelta(days=90), end):
+        if s.is_own_view and s.stance.value != "neutral" and not s.ticker.startswith(("SECTOR:", "MACRO:")):
+            guru_views.setdefault(s.ticker, {})[s.post.investor_key] = s.stance.value
+    for t in store.trades_between(end - timedelta(days=90), end):
+        if t.ticker and t.side in ("buy", "sell"):
+            guru_views.setdefault(t.ticker, {})[t.investor_key] = "bullish" if t.side == "buy" else "bearish"
+    vs_rows = []
+    for tk in sorted({c.ticker for c in recent}):
+        bviews = {}
+        for c in sorted((c for c in recent if c.ticker == tk), key=lambda c: c.published):
+            bviews[c.bank] = c.stance
+        g = guru_views.get(tk, {})
+        if not g:
+            continue
+        bmood = sum(1 if v == "bullish" else -1 for v in bviews.values())
+        gmood = sum(1 if v == "bullish" else -1 for v in g.values())
+        flag = _badge("bearish", "看法相反") if bmood * gmood < 0 else (_badge("bullish", "看法一致") if bmood * gmood > 0 else "")
+        vs_rows.append(
+            f'<tr><td>{_tick(tk, "")}</td><td class="wrap">'
+            + " ".join(_badge(v, bname(k).split(" ")[0]) for k, v in bviews.items()) + '</td><td class="wrap">'
+            + " ".join(_badge(v, names.get(k, k)) for k, v in sorted(g.items())) + f'</td><td>{flag}</td></tr>')
+    vs_html = (f'<div class="tablewrap"><table><tr><th>標的</th><th class="wrap">投行（最新評等）</th>'
+               f'<th class="wrap">大神（發言或申報交易）</th><th></th></tr>{"".join(vs_rows)}</table></div>'
+               if vs_rows else '<p class="empty">近 90 天沒有投行和大神同時表態的股票。</p>')
+
+    by_call = {id(o.call): o for o in outcomes}
+    latest = []
+    for c in calls[:60]:
+        o = by_call.get(id(c))
+        since = None
+        if o and o.entry and prices is not None:
+            now = prices.close_on_or_before(c.ticker, end)
+            since = (now[1] / o.entry - 1) * 100 if now else None
+        latest.append(
+            f'<tr><td>{c.published}</td><td>{esc(bname(c.bank))}</td><td>{_tick(c.ticker, "")}</td>'
+            f'<td>{_badge(c.stance, ACTION_LABEL.get(c.action, c.action))}</td><td>{esc(c.rating or "—")}</td>'
+            f'<td class="num">{"—" if not c.target else f"${c.target:,.0f}"}'
+            f'{"" if not (o and o.upside_at_call is not None) else f"<div class=sub>上檔 {o.upside_at_call:+.0f}%</div>"}</td>'
+            f'<td class="num">{_pct(since)}</td>'
+            f'<td>{"" if not safe_url(c.url) else f"<a href={chr(34)}{esc(safe_url(c.url))}{chr(34)} rel=noopener target=_blank>報導</a>"}</td></tr>')
+    latest_html = ('<div class="tablewrap"><table><tr><th>日期</th><th>投行</th><th>標的</th><th>動作</th>'
+                   '<th>評等</th><th class="num">目標價</th><th class="num">之後漲跌</th><th>來源</th></tr>'
+                   + "".join(latest) + '</table></div>')
+    body = (f'<h1>投行 vs 大神</h1>{note}<h2>投行準確度排行</h2>{score_html}'
+            f'<h2>研究報告 vs 自家 13F（出貨嫌疑）</h2>{caveat}{mism_html}'
+            f'<h2>投行 vs 大神：同一檔股票的看法</h2>{vs_html}<h2>最新評等變動</h2>{latest_html}')
+    return _page("投行 vs 大神 · Smartmoney Radar", body, "", "banks.html")
+
+
+def _ticker_banks(store: Store, ticker: str) -> str:
+    from .banks import BANK_BY_KEY
+    end = date.today()
+    calls = store.bank_calls(end - timedelta(days=365), end, ticker)
+    if not calls:
+        return ""
+    targets = [c.target for c in calls if c.target]
+    trs = "".join(
+        f'<tr><td>{c.published}</td><td>{esc(BANK_BY_KEY[c.bank].name if c.bank in BANK_BY_KEY else c.bank)}</td>'
+        f'<td>{_badge(c.stance, ACTION_LABEL.get(c.action, c.action))}</td><td>{esc(c.rating or "—")}</td>'
+        f'<td class="num">{"—" if not c.target else f"${c.target:,.0f}"}</td></tr>' for c in calls[:20])
+    avg = f"，平均目標價 ${sum(targets) / len(targets):,.0f}" if targets else ""
+    return (f'<h2>投行評等（近一年）</h2><p class="sub">{len(calls)} 則{avg}</p><div class="tablewrap"><table>'
+            f'<tr><th>日期</th><th>投行</th><th>動作</th><th>評等</th><th class="num">目標價</th></tr>{trs}</table></div>')
+
+
 def render_weekly(store: Store) -> str:
     from .weekly import markdown_to_html
     reps = store.reports()
@@ -724,6 +848,7 @@ def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
             f'{chart}<h2>誰在談</h2>{talk}<h2>大神的實際交易（對帳單）</h2>'
             f'{trades_table(trades, names, "../")}'
             f'{_ticker_13f(consensus, ticker, names)}'
+            f'{_ticker_banks(store, ticker)}'
             f'{_ticker_shorts(store, ticker)}')
     return _page(f"{ticker} · Smartmoney Radar", body, "../")
 
@@ -931,6 +1056,7 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     (out / "weekly.html").write_text(render_weekly(store), encoding="utf-8")
     (out / "buzz.html").write_text(render_buzz(store, investors, names), encoding="utf-8")
     (out / "macro.html").write_text(render_macro(store, names), encoding="utf-8")
+    (out / "banks.html").write_text(render_banks(store, names, prices), encoding="utf-8")
     (out / "activist.html").write_text(render_activist(store, names), encoding="utf-8")
     (out / "clone.html").write_text(render_clone(clones, names, prices is not None), encoding="utf-8")
     clone_by = {r.investor: r for r in clones}
@@ -945,6 +1071,7 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
                 if r.key.isupper() and len(r.key) <= 6}
     from .insiders import find_clusters
     tickers |= {c.ticker for c in find_clusters(store.insider_buys_between(end - timedelta(days=13), end))}
+    tickers |= {c.ticker for c in store.bank_calls(end - timedelta(days=90), end)}
     for t in sorted(tickers):
         (out / "ticker" / f"{_slug(t)}.html").write_text(
             render_ticker(store, t, names, days, prices, consensus), encoding="utf-8")

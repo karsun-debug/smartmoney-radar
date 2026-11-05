@@ -54,6 +54,9 @@ def gather(store: Store, investors: dict[str, Investor], days: int = 7, end: dat
     payload = {"period": f"{d.start} ~ {d.end}", "sector_trends": trends, "consensus_tickers": consensus,
                "filed_trades": trades, "own_calls": calls[:40], "say_vs_do_contradictions": contradictions,
                "insider_clusters": clusters, "macro": _macro_snapshot(store),
+               "bank_calls": [{"bank": c.bank, "ticker": c.ticker, "action": c.action, "stance": c.stance,
+                               "rating": c.rating, "target": c.target, "date": str(c.published)}
+                              for c in d.bank_calls[:30]],
                "broken_sources": [h.name for h in d.health if h.level == "fail"]}
     return WeekData(d.start, d.end, payload)
 
@@ -112,6 +115,7 @@ Write Markdown with these sections, in order, skipping any with no data:
 ## 大神實際動作
 ## 言行不一
 ## 內部人群買
+## 投行動態 — rating changes in bank_calls; point out where banks and investors disagree on the same ticker
 ## 總經 — from the macro block: the signals and the biggest 1-month moves
 ## 資料提醒 — only if broken_sources is non-empty
 

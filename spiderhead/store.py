@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS pageviews (
 CREATE TABLE IF NOT EXISTS macro (
     series TEXT NOT NULL, day TEXT NOT NULL, value REAL NOT NULL, PRIMARY KEY (series, day)
 );
+CREATE TABLE IF NOT EXISTS bank_calls (
+    bank TEXT NOT NULL, published TEXT NOT NULL, ticker TEXT NOT NULL, action TEXT NOT NULL,
+    stance TEXT NOT NULL, rating TEXT, target REAL, prior_target REAL, headline TEXT, url TEXT,
+    PRIMARY KEY (bank, ticker, published, action)
+);
 CREATE TABLE IF NOT EXISTS prices (
     ticker TEXT NOT NULL, day TEXT NOT NULL, close REAL NOT NULL, PRIMARY KEY (ticker, day)
 );
@@ -308,6 +313,25 @@ class Store:
     def macro(self, series: str, since: date) -> list[tuple[date, float]]:
         return [(date.fromisoformat(d), v) for d, v in self.db.execute(
             "SELECT day, value FROM macro WHERE series = ? AND day >= ? ORDER BY day", (series, since.isoformat()))]
+
+    # ------------------------------------------------------------- bank calls
+    def add_bank_calls(self, calls) -> int:
+        cur = self.db.executemany(
+            "INSERT OR IGNORE INTO bank_calls VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [(c.bank, c.published.isoformat(), c.ticker, c.action, c.stance, c.rating, c.target,
+              c.prior_target, c.headline, c.url) for c in calls])
+        self.db.commit()
+        return cur.rowcount
+
+    def bank_calls(self, start: date, end: date, ticker: str | None = None):
+        from .banks import BankCall
+        q = "SELECT * FROM bank_calls WHERE published >= ? AND published <= ?"
+        args: list = [start.isoformat(), end.isoformat()]
+        if ticker:
+            q += " AND ticker = ?"
+            args.append(ticker.upper())
+        return [BankCall(r[0], date.fromisoformat(r[1]), r[2], r[3], r[4], r[5], r[6], r[7], r[8] or "", r[9])
+                for r in self.db.execute(q + " ORDER BY published DESC", args)]
 
     # ------------------------------------------------------------- ARK
     def save_ark(self, fund: str, day: date, rows) -> None:

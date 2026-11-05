@@ -28,6 +28,7 @@ class Digest:
     trades: list[Trade] = field(default_factory=list)  # filed in the window, newest first
     health: list = field(default_factory=list)          # FamilyStatus per data source
     clusters: list = field(default_factory=list)        # insider cluster buys, last 14 days
+    bank_calls: list = field(default_factory=list)      # investment-bank rating changes in the window
 
 
 def build_digest(store: Store, investors: dict[str, Investor], days: int,
@@ -44,6 +45,7 @@ def build_digest(store: Store, investors: dict[str, Investor], days: int,
         [t for t in store.trades_between(start, end, by="filed") if t.investor_key in investors],
         store.source_health(),
         _clusters(store, end),
+        store.bank_calls(start, end),
     )
 
 

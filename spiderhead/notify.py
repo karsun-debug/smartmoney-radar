@@ -63,6 +63,16 @@ def format_line(d: Digest, dashboard_url: str | None = None, max_posts: int = 8)
         if len(d.trades) > 8:
             out.append(f"…還有 {len(d.trades) - 8} 筆")
 
+    if d.bank_calls:
+        from .banks import BANK_BY_KEY
+        act = {"upgrade": "升評", "downgrade": "降評", "initiate": "首評", "raise_pt": "調高目標價",
+               "cut_pt": "調降目標價", "reiterate": "維持"}
+        out += ["", "🏦 投行評等"]
+        for c in d.bank_calls[:6]:
+            bank = BANK_BY_KEY[c.bank].name.split(" ")[0] if c.bank in BANK_BY_KEY else c.bank
+            tgt = f" 目標 ${c.target:,.0f}" if c.target else ""
+            out.append(f"• {bank} {act.get(c.action, c.action)} {c.ticker}"
+                       f"{' → ' + c.rating if c.rating else ''}{tgt}")
     if d.clusters:
         out += ["", "🏛 內部人群買（14 天內 3 位以上內部人買進）"]
         for c in d.clusters[:5]:

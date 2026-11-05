@@ -19,17 +19,26 @@ def _child_text(elem: ET.Element, name: str) -> str | None:
     return None
 
 
-def parse_infotable(xml_text: str | bytes) -> list[Holding]:
+def parse_infotable(xml_text: str | bytes,
+                    keep: Callable[[str], bool] | None = None) -> list[Holding]:
     """Parse a 13F-HR information table XML document.
 
     Rows for the same CUSIP and option type are summed (filers often split a
     position across managers / investment discretion). Values are in US
     dollars, which is what EDGAR has required since January 2023.
+
+    The document is streamed (``iterparse``) so very large filers (bank 13Fs
+    can run to hundreds of thousands of rows) don't need the whole tree in
+    memory; ``keep(issuer_name)`` can drop rows early.
     """
-    root = ET.fromstring(xml_text)
+    import io
+    data = xml_text.encode("utf-8") if isinstance(xml_text, str) else xml_text
     merged: dict[tuple[str, str | None], Holding] = {}
-    for row in root.iter():
+    for _, row in ET.iterparse(io.BytesIO(data), events=("end",)):
         if _local(row.tag) != "infoTable":
+            continue
+        if keep is not None and not keep(_child_text(row, "nameOfIssuer") or ""):
+            row.clear()
             continue
         put_call = (_child_text(row, "putCall") or "").upper() or None
         h = Holding(
@@ -47,6 +56,7 @@ def parse_infotable(xml_text: str | bytes) -> list[Holding]:
                         old.value_usd + h.value_usd, old.shares + h.shares,
                         old.share_type, old.put_call)
         merged[h.key] = h
+        row.clear()
     return list(merged.values())
 
 
