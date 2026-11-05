@@ -23,6 +23,10 @@
 - **資料來源監控**：每個來源的成功/失敗都會記錄；壞掉的來源會顯示在儀表板，並在每日 LINE 摘要中提醒。
 - **費用控制**：只把可能含觀點的貼文送給 Claude，每次執行有上限。
 
+- **每週 AI 週報**：每週一早上由 Claude 整理一週重點（沒有 Claude key 時用範本），推播並放上儀表板。
+- **開放資料**：儀表板附 JSON / CSV / RSS（`data/`、`feed.xml`），也可以直接搜尋任何股票或大神。
+- **MCP 伺服器**：讓 Claude Desktop / Claude Code 直接查資料庫（「Pelosi 最近買了什麼？」）。
+
 更新紀錄見 [CHANGELOG.md](CHANGELOG.md)。
 
 與 GitHub 上同類專案的比較見 [docs/DESIGN.md](docs/DESIGN.md#7-與-github-同類專案比較2026-11-調查)。
@@ -121,6 +125,38 @@ SPIDERHEAD_DB=data/demo.db python examples/demo_data.py && SPIDERHEAD_DB=data/de
 到 repo 的 Settings → Secrets and variables → Actions 加入 `SPIDERHEAD_USER_AGENT`、`LINE_CHANNEL_ACCESS_TOKEN`（選填：`LINE_TO`、`ANTHROPIC_API_KEY`、`X_BEARER_TOKEN`），
 再到 Settings → Pages 把來源設為 GitHub Actions。免費方案的 Pages 網站是公開的。
 `.github/workflows/alerts.yml` 每 2 小時檢查新喊單與新申報並即時推播。資料庫存在 repo 的 `data` 分支。
+
+### 讓 Claude 直接查資料（MCP）
+
+```bash
+pip install -e ".[mcp]"
+```
+
+Claude Code：
+
+```bash
+claude mcp add smartmoney -- spiderhead mcp
+```
+
+Claude Desktop 在 `claude_desktop_config.json` 加入：
+
+```json
+{"mcpServers": {"smartmoney": {"command": "spiderhead", "args": ["mcp"],
+  "env": {"SPIDERHEAD_DB": "/你的路徑/smartmoney-radar/data/spiderhead.db"}}}}
+```
+
+提供的工具：`list_investors`、`recent_calls`、`filed_trades`、`holdings_13f`、`consensus_13f`、`insider_clusters`、`ticker_overview`、`latest_weekly_report`（全部唯讀）。
+資料庫可從 `data` 分支取得（見 docs/SETUP.md）。
+
+### 其他指令
+
+```bash
+spiderhead insiders --days 3
+```
+
+```bash
+spiderhead weekly --llm --push
+```
 
 ### 持倉與言行比對
 

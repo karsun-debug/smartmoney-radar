@@ -71,7 +71,9 @@ class Store:
         path = Path(path) if path else default_db_path()
         if str(path) != ":memory:":
             path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(path))
+        # check_same_thread=False: the MCP server answers tool calls from worker
+        # threads; SQLite itself is built serialized (thread-safe) in CPython.
+        self.db = sqlite3.connect(str(path), check_same_thread=False)
         self.db.executescript(SCHEMA)
         self._migrate()
 

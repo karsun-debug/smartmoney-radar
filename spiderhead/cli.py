@@ -95,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("verify-ciks", help="向 SEC 確認每位大神的 CIK 對應到正確基金")
     sub.add_parser("doctor", help="檢查設定與每個資料來源是否連得上")
 
+    sub.add_parser("mcp", help="啟動 MCP 伺服器（stdio），讓 Claude 等 AI 工具查詢資料庫")
+
     wk = sub.add_parser("weekly", help="產生大神週報（加 --llm 由 Claude 撰寫）")
     wk.add_argument("--llm", action="store_true")
     wk.add_argument("--push", action="store_true", help="推播到所有已設定的管道")
@@ -178,6 +180,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "list":
         for inv in investors.values():
             print(f"{inv.key:15} {inv.name:24} {inv.fund:38} CIK {inv.cik or '-'}")
+        return 0
+
+    if args.cmd == "mcp":
+        try:
+            from .mcp_server import main as mcp_main
+        except ImportError:
+            print('需要 MCP SDK：pip install -e ".[mcp]"', file=sys.stderr)
+            return 1
+        mcp_main(args.watchlist)
         return 0
 
     if args.cmd == "doctor":
