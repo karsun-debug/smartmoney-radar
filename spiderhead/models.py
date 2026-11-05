@@ -1,4 +1,4 @@
-"""Core data types shared across SpiderHead modules."""
+"""Core data types shared across Smartmoney Radar modules."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

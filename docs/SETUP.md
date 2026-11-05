@@ -1,4 +1,4 @@
-# SpiderHead 設定教學（一步一步）
+# Smartmoney Radar 設定教學（一步一步）
 
 整個流程約 20–30 分鐘。每完成一段，就跑一次 `spiderhead doctor`，它會告訴你哪裡還沒好。
 
@@ -22,17 +22,17 @@ GitHub Actions 的排程（`schedule`）**只會在預設分支（main）上執�
 需要 Python 3.10 以上。
 
 ```bash
-git clone https://github.com/karsun-debug/SpiderHead.git
+git clone https://github.com/karsun-debug/smartmoney-radar.git
 ```
 
 ```bash
-cd SpiderHead && pip install -e ".[llm,dev]"
+cd smartmoney-radar && pip install -e ".[llm,dev]"
 ```
 
 SEC 規定要附聯絡 email（換成你的）：
 
 ```bash
-export SPIDERHEAD_USER_AGENT="SpiderHead you@example.com"
+export SPIDERHEAD_USER_AGENT="Smartmoney Radar you@example.com"
 ```
 
 ```bash
@@ -106,7 +106,7 @@ spiderhead push-line --days 7
 
    | 名稱 | 內容 | 必填 |
    |---|---|---|
-   | `SPIDERHEAD_USER_AGENT` | `SpiderHead you@example.com` | ✅ |
+   | `SPIDERHEAD_USER_AGENT` | `Smartmoney Radar you@example.com` | ✅ |
    | `LINE_CHANNEL_ACCESS_TOKEN` | 步驟 2 的 token | ✅ |
    | `LINE_TO` | 步驟 2 的 user ID | 建議 |
    | `ANTHROPIC_API_KEY` | Claude API key（分析準確很多） | 建議 |

@@ -113,7 +113,7 @@ def _page(title: str, body: str, root: str) -> str:
     return (f'<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(title)}</title><link rel="stylesheet" href="{root}assets/style.css"></head>'
-            f'<body><main>{body}<footer>SpiderHead · 資料來自公開貼文、新聞與 SEC 申報 · '
+            f'<body><main>{body}<footer>Smartmoney Radar · 資料來自公開貼文、新聞與 SEC 申報 · '
             f'僅供研究參考，不構成投資建議 · 產生於 {datetime.now():%Y-%m-%d %H:%M}</footer></main>'
             f'<script src="{root}assets/app.js"></script></body></html>')
 
@@ -316,7 +316,7 @@ def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
             f'<span class="sub">{days} 天內被提到 {len(rows)} 次 · ▲ {bulls} / ▼ {bears}</span></header>'
             f'{chart}<h2>誰在談</h2>{talk}<h2>大神的實際交易（對帳單）</h2>'
             f'{trades_table(trades, names, "../")}')
-    return _page(f"{ticker} · SpiderHead", body, "../")
+    return _page(f"{ticker} · Smartmoney Radar", body, "../")
 
 
 def render_index(store: Store, investors: dict[str, Investor], days: int, step: int,
@@ -382,7 +382,7 @@ def render_index(store: Store, investors: dict[str, Investor], days: int, step: 
             f'<span class="badge">近 {recent_days} 天 {counts.get(inv.key, 0)} 則</span>'
             f'<p class="note">{esc(inv.note)}</p></a>')
 
-    body = (f'<header class="top"><h1>SpiderHead 大神追蹤</h1>'
+    body = (f'<header class="top"><h1>Smartmoney Radar 大神追蹤</h1>'
             f'<span class="sub">資料期間 {start} ～ {end}</span></header>{tiles}'
             f'<h2>產業熱度變化（每{"天" if step == 1 else f" {step} 天"}被提及的則數）</h2>{heat}{heat_table}'
             f'<h2>多位大神同時在談（近 {recent_days} 天）</h2>{cons}'
@@ -391,7 +391,7 @@ def render_index(store: Store, investors: dict[str, Investor], days: int, step: 
             f'<h2>喊單勝率排行</h2>{scoreboard_table(calls or [], names)}'
             f'<h2>大神</h2><div class="grid">{"".join(inv_cards)}</div>'
             f'<h2>最新動態</h2>{_feed_html(recent.feed, names, "")}')
-    return _page("SpiderHead 大神追蹤", body, "")
+    return _page("Smartmoney Radar 大神追蹤", body, "")
 
 
 def render_investor(store: Store, inv: Investor, names: dict[str, str], days: int, step: int,
@@ -471,7 +471,7 @@ def render_investor(store: Store, inv: Investor, names: dict[str, str], days: in
             f'<h2>喊單成績</h2>{calls_table(my_calls, "../")}'
             f'<h2>13F 季度持倉</h2>{h13}'
             f'<h2>發文紀錄</h2>{_feed_html(prof.posts, names, "../", limit=100, link_investor=False)}')
-    return _page(f"{inv.name} · SpiderHead", body, "../")
+    return _page(f"{inv.name} · Smartmoney Radar", body, "../")
 
 
 def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path,

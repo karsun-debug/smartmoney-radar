@@ -26,7 +26,7 @@ def _digest_markdown(store, investors, days: int, investor: str | None = None) -
     d = build_digest(store, investors, days, investor)
     feed = feed_markdown(d.feed, d.names)
     trend = trends_markdown(d.trends, d.consensus, d.names)
-    return f"# SpiderHead 動態摘要（{d.start} ～ {d.end}）\n\n{feed}\n\n{trend}\n"
+    return f"# Smartmoney Radar 動態摘要（{d.start} ～ {d.end}）\n\n{feed}\n\n{trend}\n"
 
 
 def _changes_from_edgar(investor, resolver_from_sec: bool):

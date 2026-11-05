@@ -54,7 +54,7 @@ def find_pending(store: Store, investors: dict[str, Investor], lookback_days: in
 
 def format_alert(pending: Pending, investors: dict[str, Investor], limit: int = 15) -> str:
     names = display_names(investors)
-    lines = ["🔔 SpiderHead 即時通知"]
+    lines = ["🔔 Smartmoney Radar 即時通知"]
     for t in pending.trades[:limit]:
         size = " · ".join(x for x in (f"{t.shares:,.0f} 股" if t.shares and "股" not in t.amount_text else "",
                                       t.amount_text) if x)

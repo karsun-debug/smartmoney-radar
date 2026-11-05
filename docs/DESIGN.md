@@ -1,4 +1,4 @@
-# SpiderHead 設計文件：投資大神「言」與「行」追蹤系統
+# Smartmoney Radar 設計文件：投資大神「言」與「行」追蹤系統
 
 ## 1. 目標
 
@@ -118,7 +118,7 @@ EDGAR 規範：User-Agent 必須帶聯絡資訊、每秒 ≤ 10 次請求。
 | [StephanAkkerman/fintwit-bot](https://github.com/StephanAkkerman/fintwit-bot) | 追蹤 X 財經推文、情緒分析、熱門代號，推到 Discord | 社群貼文 → 情緒 → 推播的流程（我們用 Claude + LINE） |
 | [wescules/insider-trading-analyzer](https://github.com/wescules/insider-trading-analyzer) | Form 4 篩選、回測內部人買進後的報酬 | **喊單後 30/90 天報酬與勝率** |
 
-SpiderHead 的定位差異：其他專案只看「申報」或只看「貼文」，我們把兩者接起來——
+Smartmoney Radar 的定位差異：其他專案只看「申報」或只看「貼文」，我們把兩者接起來——
 **誰在網路上喊了什麼 → 他實際申報買賣了什麼 → 喊完之後股價怎麼走**。
 
 ### 即時對帳單的來源與時效

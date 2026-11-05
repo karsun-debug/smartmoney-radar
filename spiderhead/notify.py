@@ -32,7 +32,7 @@ def _short(text: str, n: int) -> str:
 def format_line(d: Digest, dashboard_url: str | None = None, max_posts: int = 8) -> str:
     """Plain-text digest (LINE does not render Markdown tables)."""
     period = f"{d.start:%m/%d}" if d.start == d.end else f"{d.start:%m/%d}–{d.end:%m/%d}"
-    out = [f"📊 SpiderHead 大神摘要 {period}", ""]
+    out = [f"📊 Smartmoney Radar 大神摘要 {period}", ""]
 
     out.append("🔥 產業熱度")
     if not d.trends:

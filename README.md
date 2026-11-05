@@ -1,4 +1,6 @@
-# SpiderHead
+# Smartmoney Radar 大神雷達
+
+> 指令名稱仍是 `spiderhead`，環境變數仍以 `SPIDERHEAD_` 開頭（沿用舊名，已設定的 Secrets 不用改）。
 
 自動追蹤美國投資大神（Buffett、Ackman、Burry、Dalio、Cathie Wood、Howard Marks…）**最近說了什麼**、**哪些產業正在被熱議**，並可對照 **SEC 申報的實際持倉**，檢查「說的」跟「做的」是否一致。
 
@@ -31,7 +33,7 @@ pip install -e ".[llm,dev]"
 SEC 要求 User-Agent 帶聯絡方式：
 
 ```bash
-export SPIDERHEAD_USER_AGENT="SpiderHead your@email.com"
+export SPIDERHEAD_USER_AGENT="Smartmoney Radar your@email.com"
 ```
 
 ### 追蹤發文與產業動態
@@ -67,7 +69,7 @@ spiderhead import my_posts.json
 想每天自動更新，用 cron 排程即可：
 
 ```bash
-crontab -e   # 加入：0 8 * * * cd /path/to/SpiderHead && spiderhead fetch && spiderhead digest --out digest.md
+crontab -e   # 加入：0 8 * * * cd /path/to/smartmoney-radar && spiderhead fetch && spiderhead digest --out digest.md
 ```
 
 `sources.example.json` 示範如何加 RSS、改搜尋關鍵字、關掉某個來源（設為 `null`）。
