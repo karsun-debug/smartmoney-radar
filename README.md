@@ -9,12 +9,17 @@
 - **觀點分析**：抽出提到的個股、產業、看多/看空（關鍵字或 Claude）。
 - **產業熱度**：哪些產業被最多大神談到、偏多還是偏空、和上一期比熱度變化。
 - **共識標的**：兩位以上大神同時在談的個股，以及他們各自的立場。
-- **即時對帳單**：Form 4、13D/G、國會議員交易申報（Pelosi 等），每筆附原始文件連結。
+- **即時對帳單**：Form 4、13D/G、Saylor 的 8-K 比特幣公告、眾議院交易申報（直接解析書記處 PDF，Pelosi 等），每筆附原始文件連結。
+- **13F 歷史**：每季持倉存進資料庫，看各季市值、前五大持股與最新一季的加減碼。
 - **言行比對**：發言 vs 實際申報交易，以及 vs 13F 季度持倉。
-- **喊單勝率**：發言後 30 / 90 天股價表現，排出誰最準。
+- **喊單勝率**：發言後 30 / 90 天股價表現，排出誰最準。沒有 X API 也能算——新聞中「某某說他買了…」會被認定為本人觀點。
 - **ARK 每日交易**：比對 ARK 每天公布的持股檔，算出 Cathie Wood 當天買賣了什麼（已扣除 ETF 申購贖回造成的整體變動）。
 - **LINE 推播**：每天早上收到摘要；有新喊單或新申報交易時**即時通知**（每 2 小時檢查一次）。
 - **網頁儀表板**：產業熱度變化圖、每位大神一頁、每檔個股一頁，手機可看、支援深色模式。
+- **資料來源監控**：每個來源的成功/失敗都會記錄；壞掉的來源會顯示在儀表板，並在每日 LINE 摘要中提醒。
+- **費用控制**：只把可能含觀點的貼文送給 Claude，每次執行有上限。
+
+更新紀錄見 [CHANGELOG.md](CHANGELOG.md)。
 
 與 GitHub 上同類專案的比較見 [docs/DESIGN.md](docs/DESIGN.md#7-與-github-同類專案比較2026-11-調查)。
 
@@ -33,7 +38,7 @@ pip install -e ".[llm,dev]"
 SEC 要求 User-Agent 帶聯絡方式：
 
 ```bash
-export SPIDERHEAD_USER_AGENT="Smartmoney Radar your@email.com"
+export SPIDERHEAD_USER_AGENT="SmartmoneyRadar your@email.com"
 ```
 
 ### 追蹤發文與產業動態
@@ -76,9 +81,7 @@ crontab -e   # 加入：0 8 * * * cd /path/to/smartmoney-radar && spiderhead fet
 
 ### LINE 推播
 
-1. 到 [LINE Developers](https://developers.line.biz/) 建立 Messaging API channel（會同時建立一個 LINE 官方帳號），用手機加它好友。
-2. 在 channel 設定頁發行 **Channel access token (long-lived)**。
-3. 設定環境變數後推播（`LINE_TO` 可填你的 userId；不填會廣播給所有好友）：
+申請 LINE 官方帳號與 token 的完整步驟見 [docs/SETUP.md](docs/SETUP.md#步驟-2建立-line-推播)。設定環境變數後推播（`LINE_TO` 填你的 userId；不填會廣播給所有好友）：
 
 ```bash
 export LINE_CHANNEL_ACCESS_TOKEN="你的 token"
@@ -113,6 +116,7 @@ SPIDERHEAD_DB=data/demo.db python examples/demo_data.py && SPIDERHEAD_DB=data/de
 `.github/workflows/daily.yml` 每天台灣時間 07:17 會：抓資料 → 產生儀表板發佈到 GitHub Pages → 推 LINE。
 到 repo 的 Settings → Secrets and variables → Actions 加入 `SPIDERHEAD_USER_AGENT`、`LINE_CHANNEL_ACCESS_TOKEN`（選填：`LINE_TO`、`ANTHROPIC_API_KEY`、`X_BEARER_TOKEN`），
 再到 Settings → Pages 把來源設為 GitHub Actions。免費方案的 Pages 網站是公開的。
+`.github/workflows/alerts.yml` 每 2 小時檢查新喊單與新申報並即時推播。資料庫存在 repo 的 `data` 分支。
 
 ### 持倉與言行比對
 
