@@ -71,7 +71,11 @@ def _parse_date(value: str | None) -> date:
     try:
         return parsedate_to_datetime(value).date()
     except (TypeError, ValueError):
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+        pass
+    try:
+        return datetime.fromisoformat(value.strip().replace("Z", "+00:00")).date()
+    except ValueError:
+        return date.today()          # one odd date must not drop the whole feed
 
 
 # ---------------------------------------------------------------- analyzers

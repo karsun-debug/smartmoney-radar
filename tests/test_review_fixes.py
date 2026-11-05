@@ -94,3 +94,11 @@ def test_echoed_call_counted_once():
                       "https://n/later", "news"))
     sigs = [s for p in posts for s in KeywordAnalyzer().analyze(p)]
     assert len(score_calls(sigs, pb)) == 2          # 3 echoes count once, a later call counts again
+
+
+def test_rss_bad_date_does_not_drop_feed():
+    from spiderhead.posts import parse_rss
+    rss = (b"<rss><channel><item><title>A</title><pubDate>sometime last week</pubDate></item>"
+           b"<item><title>B</title><pubDate>2026-11-01T10:00:00Z</pubDate></item></channel></rss>")
+    posts = parse_rss(rss, "ackman")
+    assert [p.published for p in posts] == [TODAY, date(2026, 11, 1)]
