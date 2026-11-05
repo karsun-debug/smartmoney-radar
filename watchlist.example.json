@@ -1,0 +1,7 @@
+[
+  {"key": "duan", "name": "段永平", "fund": "H&H International Investment", "cik": "0001759760",
+   "proof": "13F", "note": "雪球上發文量大，華人圈聲量最高的價值投資人之一。請先用 verify-ciks 確認 CIK。"},
+  {"key": "lilu", "name": "李录 Li Lu", "fund": "Himalaya Capital Management", "cik": "0001709323",
+   "proof": "13F", "note": "查理·蒙格欽點的投資人。請先用 verify-ciks 確認 CIK。"},
+  {"key": "saylor", "remove": true}
+]

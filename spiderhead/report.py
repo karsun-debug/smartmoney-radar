@@ -68,7 +68,8 @@ def feed_markdown(rows, names: dict[str, str]) -> str:
     """``rows`` is a list of (Post, [Signal]) newest first."""
     lines = ["## 大神最新動態", "", "| 日期 | 誰 | 來源 | 內容 | 觀點 |", "|---|---|---|---|---|"]
     for post, signals in rows:
-        views = " ".join(f"{STANCE_ICON[s.stance.value]}{s.ticker.removeprefix('SECTOR:')}"
+        from .sectors import signal_label
+        views = " ".join(f"{STANCE_ICON[s.stance.value]}{signal_label(s.ticker, s.sector)}"
                          for s in signals) or "—"
         src = "本人" if post.kind == "own" else "報導"
         link = f"[{post.source}]({post.url})" if post.url else post.source

@@ -50,7 +50,8 @@ TICKER_SECTOR: dict[str, str] = {
     "BAC": "financials", "JPM": "financials", "CB": "financials", "AXP": "financials",
     "BRK.B": "financials", "OXY": "energy", "CVX": "energy", "XOM": "energy",
     "UNH": "healthcare", "LLY": "healthcare", "NVO": "healthcare", "BA": "industrials",
-    "UNP": "industrials", "SPY": "macro", "TLT": "macro", "MSTR": "crypto", "COIN": "crypto",
+    "UNP": "industrials", "BABA": "internet", "JD": "internet", "PDD": "internet",
+    "TSLA": "consumer", "UBER": "internet", "NFLX": "internet", "GLD": "macro", "SPY": "macro", "TLT": "macro", "MSTR": "crypto", "COIN": "crypto",
 }
 
 _PATTERNS = {s: re.compile(r"\b(" + "|".join(re.escape(k) for k in kws) + r")(?:s|es)?\b", re.I)
@@ -68,3 +69,12 @@ def sector_for(ticker: str, fallback_text: str = "") -> str:
     if ticker.startswith("MACRO:"):
         return "macro"
     return TICKER_SECTOR.get(ticker.upper()) or classify_text(fallback_text)[0]
+
+
+def signal_label(ticker: str, sector: str) -> str:
+    """Human label for a signal: the ticker, or the sector name for SECTOR:/MACRO: views."""
+    if ticker.startswith("SECTOR:"):
+        return SECTORS.get(sector, sector)
+    if ticker.startswith("MACRO:"):
+        return "總經·" + ticker.split(":", 1)[1].replace("_", " ").title()
+    return ticker

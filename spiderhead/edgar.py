@@ -87,6 +87,10 @@ class EdgarClient:
                 return body
         raise LookupError(f"No information table found in {filing.accession}")
 
+    def entity_name(self, cik: str) -> str:
+        """Registered name of the entity behind a CIK (for checking the watchlist)."""
+        return self._get(SUBMISSIONS_URL.format(cik=str(cik).zfill(10))).json().get("name", "")
+
     def company_name_map(self) -> dict[str, str]:
         """SEC's issuer-name -> ticker table, for ``TickerResolver``."""
         data = self._get(COMPANY_TICKERS_URL).json()

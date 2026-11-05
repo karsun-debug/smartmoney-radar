@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 from .consistency import check, quarter_end
@@ -21,25 +21,12 @@ def _analyze_pending(store, analyzer) -> int:
     return len(pending)
 
 
-def _names(investors) -> dict[str, str]:
-    from .sectors import SECTORS
-    names = {k: v.name for k, v in investors.items()}
-    names.update({f"industry:{k}": f"產業·{v}" for k, v in SECTORS.items()})
-    return names
-
-
-def _feed_and_trends(store, investors, days: int, investor: str | None = None) -> str:
-    from .store import window
-    from .trends import consensus, sector_trends
-    start, end = window(days)
-    prev_start, prev_end = window(days, start - timedelta(days=1))
-    names = _names(investors)
-    posts = store.posts_between(start, end, investor, kinds=("own", "news"))
-    feed = feed_markdown([(p, store.signals_for(p)) for p in posts], names)
-    cur = store.signals_between(start, end)
-    trend = trends_markdown(sector_trends(cur, store.signals_between(prev_start, prev_end)),
-                            consensus(cur), names)
-    return f"# SpiderHead 動態摘要（{start} ～ {end}）\n\n{feed}\n\n{trend}\n"
+def _digest_markdown(store, investors, days: int, investor: str | None = None) -> str:
+    from .digest import build_digest
+    d = build_digest(store, investors, days, investor)
+    feed = feed_markdown(d.feed, d.names)
+    trend = trends_markdown(d.trends, d.consensus, d.names)
+    return f"# SpiderHead 動態摘要（{d.start} ～ {d.end}）\n\n{feed}\n\n{trend}\n"
 
 
 def _changes_from_edgar(investor, resolver_from_sec: bool):
@@ -77,6 +64,17 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("list", help="列出追蹤名單")
+    sub.add_parser("verify-ciks", help="向 SEC 確認每位大神的 CIK 對應到正確基金")
+
+    pl = sub.add_parser("push-line", help="把摘要推播到 LINE")
+    pl.add_argument("--days", type=int, default=1, help="摘要涵蓋最近 N 天（預設 1）")
+    pl.add_argument("--dashboard-url", help="附在訊息最後的儀表板網址")
+    pl.add_argument("--dry-run", action="store_true", help="只印出訊息，不送出")
+
+    db = sub.add_parser("dashboard", help="產生網頁儀表板（靜態 HTML）")
+    db.add_argument("--out", default="site", help="輸出資料夾")
+    db.add_argument("--days", type=int, default=90)
+    db.add_argument("--with-13f", action="store_true", help="從 EDGAR 抓最新 13F 放進大神頁面")
 
     f = sub.add_parser("fetch", help="自動抓取大神發文與產業新聞，存進資料庫並分析")
     f.add_argument("--days", type=int, default=7, help="只保留最近 N 天")
@@ -127,7 +125,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{inv.key:15} {inv.name:24} {inv.fund:38} CIK {inv.cik or '-'}")
         return 0
 
-    if args.cmd in ("fetch", "import", "feed", "trends", "digest"):
+    if args.cmd == "verify-ciks":
+        from .edgar import EdgarClient
+        client = EdgarClient()
+        for inv in investors.values():
+            if not inv.cik:
+                continue
+            try:
+                name = client.entity_name(inv.cik)
+            except Exception as exc:
+                name = f"ERROR {exc}"
+            print(f"{inv.key:14} CIK {inv.cik}  expected: {inv.fund:40} SEC: {name}")
+        return 0
+
+    if args.cmd in ("fetch", "import", "feed", "trends", "digest", "push-line", "dashboard"):
         return _store_commands(args, investors)
 
     analyzer = None
@@ -188,7 +199,27 @@ def _store_commands(args, investors) -> int:
         print(f"抓到 {len(posts)} 則，新增 {added} 則，分析 {analyzed} 則")
         return 0
 
-    text = _feed_and_trends(store, investors, args.days, getattr(args, "investor", None))
+    if args.cmd == "push-line":
+        import os
+        from .digest import build_digest
+        from .notify import LineNotifier, format_line
+        url = args.dashboard_url or os.environ.get("SPIDERHEAD_DASHBOARD_URL")
+        text = format_line(build_digest(store, investors, args.days), url)
+        if args.dry_run:
+            print(text)
+            return 0
+        n = LineNotifier().send(text)
+        print(f"已送出 LINE（{n} 次請求）")
+        return 0
+
+    if args.cmd == "dashboard":
+        from .dashboard import build_site
+        holdings = _holdings_for_dashboard(store, investors) if args.with_13f else None
+        index = build_site(store, investors, args.out, days=args.days, holdings=holdings)
+        print(f"已產生 {index}")
+        return 0
+
+    text = _digest_markdown(store, investors, args.days, getattr(args, "investor", None))
     if args.cmd == "feed":
         text = text.split("\n## 產業熱度")[0]
     elif args.cmd == "trends":
@@ -199,3 +230,24 @@ def _store_commands(args, investors) -> int:
     else:
         print(text)
     return 0
+
+
+def _holdings_for_dashboard(store, investors):
+    """Latest 13F diff + say/do check for every 13F filer; failures are skipped."""
+    from .store import window
+    out = {}
+    analyzer = KeywordAnalyzer()
+    for inv in investors.values():
+        if not inv.files_13f:
+            continue
+        try:
+            quarter, changes = _changes_from_edgar(inv, resolver_from_sec=True)
+        except Exception as exc:
+            print(f"warning: 13F {inv.key}: {exc}", file=sys.stderr)
+            continue
+        q_end = date.fromisoformat(quarter)
+        q_start = date(q_end.year, q_end.month - 2, 1)   # first day of that quarter
+        posts = store.posts_between(q_start, q_end, inv.key, kinds=("own",))
+        signals = [s for p in posts for s in (store.signals_for(p) or analyzer.analyze(p))]
+        out[inv.key] = (quarter, changes, check(signals, changes))
+    return out

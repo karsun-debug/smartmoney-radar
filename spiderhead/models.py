@@ -13,6 +13,12 @@ class Investor:
     fund: str           # filing entity, e.g. "Berkshire Hathaway Inc"
     cik: str            # SEC Central Index Key of the filing entity
     handles: dict[str, str] = field(default_factory=dict)  # {"x": "...", "rss": "..."}
+    proof: str = "13F"  # how their trades are verified: "13F", "13F+daily", "8-K"
+    note: str = ""      # caveats shown on the dashboard
+
+    @property
+    def files_13f(self) -> bool:
+        return bool(self.cik) and self.proof.startswith("13F")
 
 
 @dataclass(frozen=True)

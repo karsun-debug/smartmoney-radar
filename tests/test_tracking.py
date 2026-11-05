@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from email.utils import format_datetime
 from datetime import datetime, timezone
 
-from spiderhead.cli import _feed_and_trends
+from spiderhead.cli import _digest_markdown
 from spiderhead.models import Post, Stance
 from spiderhead.posts import KeywordAnalyzer
 from spiderhead.sectors import classify_text
@@ -85,7 +85,7 @@ def test_trends_and_consensus():
 def test_digest_renders():
     store = Store(":memory:")
     inv, _, _ = _collect(store)
-    md = _feed_and_trends(store, inv, 7)
+    md = _digest_markdown(store, inv, 7)
     assert "Bill Ackman" in md and "AI / 半導體" in md and "**GOOGL**（2 位）" in md
 
 
