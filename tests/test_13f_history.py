@@ -146,3 +146,17 @@ def test_filed_date_migration_and_default(tmp_path):
     con.close()
     store = Store(db)
     assert store.filed_13f("b", "2026-06-30") == date(2026, 8, 14)      # quarter end + 45 days
+
+
+def test_clone_latest_quarter_uses_last_available_close():
+    from spiderhead.clone import backtest
+    from spiderhead.models import Holding
+    from spiderhead.performance import PriceBook
+    store = Store(":memory:")
+    store.save_13f("buffett", "2026-09-30", "x", [Holding("APPLE", "A1", "COM", 10, 1)], lambda h: "AAPL",
+                   date(2026, 11, 3))
+    # Prices stop the day before "today" (normal data lag).
+    feeds = {"aapl.us": _csv(date(2026, 11, 1), 4, 100, 1), "spy.us": _csv(date(2026, 11, 1), 4, 100, 0.5)}
+    pb = PriceBook(store, lambda url, h: feeds[url.split("s=")[1].split("&")[0]])
+    [p] = backtest(store, load_watchlist()["buffett"], pb, today=date(2026, 11, 5)).periods
+    assert p.exit == date(2026, 11, 5) and round(p.ret, 2) == round((103 / 102 - 1) * 100, 2)

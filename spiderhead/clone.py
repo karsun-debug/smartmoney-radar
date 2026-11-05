@@ -66,12 +66,11 @@ class CloneResult:
 
 
 def _ret(prices: PriceBook, ticker: str, start: date, end: date) -> float | None:
+    """Return from the first close on/after ``start`` to the last close on/before ``end``."""
     a = prices.close_on_or_after(ticker, start)
-    b = prices.close_on_or_after(ticker, end)
-    if not a or not b or b[0] < a[0] or a[0] > end:
-        return None
-    if b[0] == a[0] and end > start:
-        return None                       # no price after entry yet
+    b = prices.close_on_or_before(ticker, end)
+    if not a or not b or b[0] <= a[0]:
+        return None                       # no trading day inside the holding period yet
     return (b[1] / a[1] - 1) * 100
 
 

@@ -21,7 +21,13 @@ DEFAULT_SUBS = ("wallstreetbets", "stocks", "investing")
 FEED = "https://www.reddit.com/r/{sub}/new/.rss?limit=100"
 WORD = re.compile(r"\b[A-Z]{2,5}\b")
 NOT_TICKERS = {"CEO", "CFO", "DD", "YOLO", "IPO", "ETF", "USA", "USD", "GDP", "FED", "AI", "EPS", "ATH",
-               "IMO", "TLDR", "FOMO", "SEC", "LOL", "WSB", "OTM", "ITM", "EOD", "PE", "API", "EV"}
+               "IMO", "TLDR", "FOMO", "SEC", "LOL", "WSB", "OTM", "ITM", "EOD", "PE", "API", "EV",
+               # common English words that are also real tickers
+               "A", "AN", "AM", "ARE", "AT", "BE", "BIG", "BY", "CAN", "CAR", "CASH", "DO", "EAT", "EVER",
+               "FAST", "FOR", "FUN", "GO", "GOOD", "HAS", "HE", "HIGH", "HOME", "IT", "KEY", "LIVE", "LOVE",
+               "LOW", "MAN", "MAIN", "NEW", "NICE", "NOW", "ON", "ONE", "OPEN", "OR", "OUT", "PLAY", "POST",
+               "REAL", "RUN", "SAFE", "SEE", "SO", "TRUE", "TWO", "UP", "WELL", "ALL", "ANY", "BEST", "CASH",
+               "JUST", "MOST", "PAY", "RIDE", "SAVE", "TELL", "VERY", "WANT", "YOU", "ME", "MY", "WE", "US"}
 
 BULL_EXTRA = ("calls", "moon", "rocket", "🚀", "to the moon", "diamond hands", "long")
 BEAR_EXTRA = ("puts", "rug", "dump", "bag holder", "bagholder", "short")
@@ -33,7 +39,11 @@ class RetailAnalyzer:
 
     def analyze(self, post: Post) -> list[Signal]:
         text = post.text
-        tickers = set(CASHTAG.findall(text)) | {w for w in WORD.findall(text) if w in self.universe}
+        tickers = set(CASHTAG.findall(text))
+        letters = [c for c in text if c.isalpha()]
+        shouting = letters and sum(c.isupper() for c in letters) / len(letters) > 0.7
+        if not shouting:                  # ALL-CAPS posts make every word look like a ticker
+            tickers |= {w for w in WORD.findall(text) if w in self.universe}
         if not tickers:
             return []
         low = text.lower()

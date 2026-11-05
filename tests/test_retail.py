@@ -41,3 +41,10 @@ def test_retail_flow_and_isolation(tmp_path):
     build_site(store, load_watchlist(), tmp_path, days=7)
     html = (tmp_path / "retail.html").read_text(encoding="utf-8")
     assert "看法相反" in html and "Michael Burry" in html
+
+
+def test_retail_ignores_english_words_and_shouting():
+    ra = RetailAnalyzer({"BE", "IT", "NVDA", "ON"})
+    assert ra.analyze(Post("r", TODAY, "It will BE huge, IT is ON", "reddit", None, "retail")) == []
+    assert ra.analyze(Post("r", TODAY, "NVDA IS GOING TO THE MOON BUY BUY", "reddit", None, "retail")) == []
+    assert {s.ticker for s in ra.analyze(Post("r", TODAY, "THIS IS $NVDA TIME", "reddit", None, "retail"))} == {"NVDA"}

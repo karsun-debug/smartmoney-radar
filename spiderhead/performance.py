@@ -57,6 +57,11 @@ class PriceBook:
         self._cache[ticker] = rows
         return rows
 
+    def close_on_or_before(self, ticker: str, day: date) -> tuple[date, float] | None:
+        rows = self.series(ticker)
+        i = bisect.bisect_right(rows, (day, float("inf")))
+        return rows[i - 1] if i > 0 else None
+
     def close_on_or_after(self, ticker: str, day: date) -> tuple[date, float] | None:
         rows = self.series(ticker)
         i = bisect.bisect_left(rows, (day, float("-inf")))
