@@ -73,8 +73,18 @@ class Post:
     investor_key: str
     published: date
     text: str
-    source: str = "manual"     # x / rss / interview / letter / manual
+    source: str = "manual"     # x / rss / news / interview / letter / manual
     url: str | None = None
+    kind: str = "own"          # own: the investor's own words; news: coverage of them;
+                               # industry: sector news not tied to one investor
+
+    @property
+    def uid(self) -> str:
+        """Stable id for de-duplication across fetches."""
+        import hashlib
+        # Keyed per investor: one article can be relevant to several of them.
+        basis = f"{self.investor_key}|{self.url or (str(self.published) + self.text[:200])}"
+        return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
 
 
 class Stance(str, Enum):
@@ -86,11 +96,12 @@ class Stance(str, Enum):
 @dataclass(frozen=True)
 class Signal:
     """A view on one ticker or theme extracted from a post."""
-    ticker: str            # ticker, or "MACRO:<theme>" for non-stock views
+    ticker: str            # ticker, "MACRO:<theme>" or "SECTOR:<sector key>"
     stance: Stance
     confidence: float      # 0..1
     rationale: str
     post: Post
+    sector: str = "other"  # key of spiderhead.sectors.SECTORS
 
 
 class Verdict(str, Enum):

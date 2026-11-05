@@ -4,13 +4,42 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 from .consistency import check, quarter_end
 from .holdings import TickerResolver, diff_holdings, parse_infotable
 from .posts import ClaudeAnalyzer, KeywordAnalyzer, load_posts_json
-from .report import consistency_markdown, holdings_markdown
+from .report import consistency_markdown, feed_markdown, holdings_markdown, trends_markdown
 from .watchlist import load_watchlist
+
+
+def _analyze_pending(store, analyzer) -> int:
+    pending = store.unanalyzed()
+    for post in pending:
+        store.save_signals(post, analyzer.analyze(post))
+    return len(pending)
+
+
+def _names(investors) -> dict[str, str]:
+    from .sectors import SECTORS
+    names = {k: v.name for k, v in investors.items()}
+    names.update({f"industry:{k}": f"產業·{v}" for k, v in SECTORS.items()})
+    return names
+
+
+def _feed_and_trends(store, investors, days: int, investor: str | None = None) -> str:
+    from .store import window
+    from .trends import consensus, sector_trends
+    start, end = window(days)
+    prev_start, prev_end = window(days, start - timedelta(days=1))
+    names = _names(investors)
+    posts = store.posts_between(start, end, investor, kinds=("own", "news"))
+    feed = feed_markdown([(p, store.signals_for(p)) for p in posts], names)
+    cur = store.signals_between(start, end)
+    trend = trends_markdown(sector_trends(cur, store.signals_between(prev_start, prev_end)),
+                            consensus(cur), names)
+    return f"# SpiderHead 動態摘要（{start} ～ {end}）\n\n{feed}\n\n{trend}\n"
 
 
 def _changes_from_edgar(investor, resolver_from_sec: bool):
@@ -49,6 +78,26 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("list", help="列出追蹤名單")
 
+    f = sub.add_parser("fetch", help="自動抓取大神發文與產業新聞，存進資料庫並分析")
+    f.add_argument("--days", type=int, default=7, help="只保留最近 N 天")
+    f.add_argument("--sources", help="JSON file with extra RSS / X / news queries")
+    f.add_argument("--no-news", action="store_true", help="skip Google News per investor")
+    f.add_argument("--no-industry", action="store_true", help="skip industry news")
+    f.add_argument("--llm", action="store_true", help="analyze with Claude")
+
+    im = sub.add_parser("import", help="匯入手動整理的貼文 JSON/JSONL")
+    im.add_argument("posts_file")
+    im.add_argument("--llm", action="store_true")
+
+    for name, desc in (("feed", "大神最新發文"), ("trends", "產業熱度與共識標的"),
+                       ("digest", "完整摘要（發文 + 產業熱度）")):
+        c = sub.add_parser(name, help=desc)
+        c.add_argument("--days", type=int, default=7)
+        if name == "feed":
+            c.add_argument("--investor")
+        if name == "digest":
+            c.add_argument("--out", help="write Markdown to this file")
+
     h = sub.add_parser("holdings", help="最新一季 13F 持倉變化")
     h.add_argument("investor")
     h.add_argument("--prev-xml", help="offline: previous quarter info table XML")
@@ -75,8 +124,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "list":
         for inv in investors.values():
-            print(f"{inv.key:15} {inv.name:24} {inv.fund:38} CIK {inv.cik}")
+            print(f"{inv.key:15} {inv.name:24} {inv.fund:38} CIK {inv.cik or '-'}")
         return 0
+
+    if args.cmd in ("fetch", "import", "feed", "trends", "digest"):
+        return _store_commands(args, investors)
 
     analyzer = None
     if args.cmd in ("posts", "report"):
@@ -92,6 +144,9 @@ def main(argv: list[str] | None = None) -> int:
     inv = investors.get(args.investor)
     if inv is None:
         print(f"unknown investor {args.investor!r}; try `spiderhead list`", file=sys.stderr)
+        return 2
+    if not (args.prev_xml and args.curr_xml) and not inv.cik:
+        print(f"{inv.key} has no CIK; add one with --watchlist to compare 13F", file=sys.stderr)
         return 2
     if args.prev_xml and args.curr_xml:
         quarter, changes = _changes_from_files(args.prev_xml, args.curr_xml, args.quarter,
@@ -111,4 +166,36 @@ def main(argv: list[str] | None = None) -> int:
     print(holdings_markdown(inv, quarter, changes, top=10))
     print()
     print(consistency_markdown(check(signals, changes)))
+    return 0
+
+
+def _store_commands(args, investors) -> int:
+    from .store import Store
+    store = Store()
+    if args.cmd in ("fetch", "import"):
+        analyzer = ClaudeAnalyzer() if args.llm else KeywordAnalyzer()
+        if args.cmd == "fetch":
+            from .sources import Collector, load_sources
+            collector = Collector(load_sources(investors, args.sources))
+            posts = collector.collect(args.days, news=not args.no_news,
+                                      industries=not args.no_industry)
+            for err in collector.errors:
+                print(f"warning: {err}", file=sys.stderr)
+        else:
+            posts = load_posts_json(args.posts_file)
+        added = store.add_posts(posts)
+        analyzed = _analyze_pending(store, analyzer)
+        print(f"抓到 {len(posts)} 則，新增 {added} 則，分析 {analyzed} 則")
+        return 0
+
+    text = _feed_and_trends(store, investors, args.days, getattr(args, "investor", None))
+    if args.cmd == "feed":
+        text = text.split("\n## 產業熱度")[0]
+    elif args.cmd == "trends":
+        text = "## 產業熱度" + text.split("\n## 產業熱度", 1)[1]
+    if getattr(args, "out", None):
+        Path(args.out).write_text(text, encoding="utf-8")
+        print(f"已寫入 {args.out}")
+    else:
+        print(text)
     return 0

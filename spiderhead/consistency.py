@@ -30,7 +30,7 @@ def check(signals: Iterable[Signal], changes: Iterable[PositionChange]) -> list[
 
     items: list[ConsistencyItem] = []
     for sig in signals:
-        if sig.stance is Stance.NEUTRAL or sig.ticker.startswith("MACRO:"):
+        if sig.stance is Stance.NEUTRAL or sig.ticker.startswith(("MACRO:", "SECTOR:")):
             continue
         rows = by_ticker.get(sig.ticker.upper())
         if not rows:

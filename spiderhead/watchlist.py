@@ -25,6 +25,11 @@ DEFAULT_WATCHLIST: list[Investor] = [
     Investor("tepper", "David Tepper", "Appaloosa Management", "0001656456"),
     Investor("klarman", "Seth Klarman", "Baupost Group", "0001061768"),
     Investor("icahn", "Carl Icahn", "Icahn Carl C", "0000921669"),
+    # Active posters. CIK left empty where we track only their words; add the
+    # fund's CIK in your watchlist JSON to enable 13F comparison.
+    Investor("wood", "Cathie Wood", "ARK Invest", "", {"x": "CathieDWood"}),
+    Investor("marks", "Howard Marks", "Oaktree Capital", ""),
+    Investor("chamath", "Chamath Palihapitiya", "Social Capital", "", {"x": "chamath"}),
 ]
 
 
@@ -39,7 +44,7 @@ def load_watchlist(path: str | Path | None = None) -> dict[str, Investor]:
         for raw in json.loads(Path(path).read_text(encoding="utf-8")):
             inv = Investor(
                 key=raw["key"], name=raw["name"], fund=raw.get("fund", raw["name"]),
-                cik=str(raw["cik"]).zfill(10), handles=raw.get("handles", {}),
+                cik=str(raw["cik"]).zfill(10) if raw.get("cik") else "", handles=raw.get("handles", {}),
             )
             investors[inv.key] = inv
     return investors

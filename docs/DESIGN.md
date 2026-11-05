@@ -8,6 +8,14 @@
 
 > 這只是資訊整理工具，不構成投資建議。13F 有落後與盲點（見第 6 節），結論需人工判讀。
 
+### 1.1 追蹤模式（主要用法）
+
+軟體每天自動去抓「誰發了什麼」以及產業新聞，整理成一份摘要：
+
+1. **大神最新動態**：時間軸列出每則發文/報導、來源連結、抽出的觀點（🟢 看多 / 🔴 看空）。
+2. **產業熱度**：每個產業被幾位大神提到、多少產業新聞、整體偏多或偏空、與上一期相比熱度變化。
+3. **共識標的**：兩位以上大神同時提到的個股與各自立場（例：GOOGL — Ackman 🟢、Wood 🟢；NVDA — Burry 🔴、Wood 🟢）。
+
 ## 2. 資料來源
 
 | 類別 | 來源 | 時效 | 能看到什麼 | 成本 |
@@ -52,6 +60,10 @@ EDGAR 規範：User-Agent 必須帶聯絡資訊、每秒 ≤ 10 次請求。
 | `edgar.py` | EDGAR API：列出申報、下載 13F 資訊表 XML、取得公司名→代號對照表 |
 | `holdings.py` | 解析 13F XML（合併同 CUSIP 的拆分列）、季對季比較 NEW/ADD/TRIM/EXIT/HOLD、CUSIP→代號 |
 | `posts.py` | 匯入貼文（JSON/JSONL、RSS/Atom）；`KeywordAnalyzer`（離線）與 `ClaudeAnalyzer`（AI） |
+| `sources.py` | 自動抓取：X API v2、RSS/Atom、Google News（每位大神 + 每個產業）；單一來源失敗不影響其他 |
+| `store.py` | SQLite（`data/spiderhead.db`）：貼文去重、記錄已分析、查詢時間區間 |
+| `sectors.py` | 產業分類（AI/半導體、金融、能源、總經…），關鍵字與代號對照 |
+| `trends.py` | 產業熱度（含與上一期比較）、多位大神共識標的 |
 | `consistency.py` | 把觀點與同季持倉變化配對，判定一致/矛盾/未動/查無；Put 選擇權視為反向 |
 | `report.py` | 輸出中文 Markdown 報告 |
 | `cli.py` | `spiderhead list / holdings / posts / report` |
@@ -79,8 +91,9 @@ EDGAR 規範：User-Agent 必須帶聯絡資訊、每秒 ≤ 10 次請求。
 
 ## 5. 路線圖
 
-- **MVP（本次提交）**：CLI、13F 比較、貼文分析、言行報告、離線測試。
-- **v0.2**：SQLite 儲存歷史持倉與貼文；Form 4 / 13D 解析，縮短「行」的落後時間。
+- **MVP**：CLI、13F 比較、貼文分析、言行報告、離線測試。
+- **v0.2（本次）**：自動抓取發文與產業新聞、SQLite 儲存、產業熱度、共識標的、摘要報告。
+- **v0.2.x**：Form 4 / 13D 解析，縮短「行」的落後時間；持倉歷史也存進 SQLite。
 - **v0.3**：排程（cron / GitHub Actions），新申報或新貼文時推播（LINE / Telegram / Email）。
 - **v0.4**：網頁儀表板 —— 大神共識熱力圖（多人同時加碼的標的）、個人言行一致率排行、申報後股價表現回測。
 - **v0.5**：訪談影片自動轉逐字稿；用 Claude 摘要致股東信每段觀點並標出處。

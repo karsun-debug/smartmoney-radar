@@ -1,0 +1,13 @@
+{
+  "investors": {
+    "ackman": {"x": "BillAckman"},
+    "marks": {"news": "\"Howard Marks\" memo"},
+    "buffett": {"news": "\"Warren Buffett\" OR \"Berkshire Hathaway\""},
+    "icahn": {"news": null}
+  },
+  "industries": {
+    "ai_semis": "AI chips OR semiconductor OR \"data center\"",
+    "real_estate": "commercial real estate OR REIT",
+    "crypto": null
+  }
+}

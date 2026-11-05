@@ -16,6 +16,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from .models import Post, Signal, Stance
+from .sectors import SECTORS, classify_text, sector_for
 
 # ---------------------------------------------------------------- loading
 
@@ -31,7 +32,8 @@ def load_posts_json(path: str | Path) -> list[Post]:
     records = json.loads(raw) if raw.startswith("[") else [
         json.loads(line) for line in raw.splitlines() if line.strip()]
     return [Post(investor_key=r["investor"], published=date.fromisoformat(r["date"][:10]),
-                 text=r["text"], source=r.get("source", "manual"), url=r.get("url"))
+                 text=r["text"], source=r.get("source", "manual"), url=r.get("url"),
+                 kind=r.get("kind", "own"))
             for r in records]
 
 
@@ -102,8 +104,15 @@ class KeywordAnalyzer:
         else:
             stance = Stance.NEUTRAL
         conf = 0.0 if stance is Stance.NEUTRAL else min(0.9, 0.4 + 0.15 * abs(bull - bear))
-        return [Signal(t, stance, conf, f"keywords bull={bull} bear={bear}", post)
-                for t in sorted(tickers)]
+        why = f"keywords bull={bull} bear={bear}"
+        signals = [Signal(t, stance, conf, why, post, sector_for(t, text))
+                   for t in sorted(tickers)]
+        # Industry-level views ("AI capex is a bubble") with no specific ticker.
+        covered = {s.sector for s in signals}
+        for sec in classify_text(text):
+            if sec != "other" and sec not in covered:
+                signals.append(Signal(f"SECTOR:{sec}", stance, conf * 0.8, why, post, sec))
+        return signals
 
 
 SIGNAL_SCHEMA = {
@@ -115,13 +124,15 @@ SIGNAL_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "ticker": {"type": "string",
-                               "description": "US ticker in caps, or MACRO:<theme> for non-stock views"},
+                               "description": "US ticker in caps, MACRO:<theme> for macro views, "
+                                              "or SECTOR:<sector> for industry-wide views"},
+                    "sector": {"type": "string", "enum": list(SECTORS)},
                     "stance": {"type": "string", "enum": ["bullish", "bearish", "neutral"]},
                     "confidence": {"type": "number"},
                     "rationale": {"type": "string",
                                   "description": "One sentence, quoting the post where possible"},
                 },
-                "required": ["ticker", "stance", "confidence", "rationale"],
+                "required": ["ticker", "sector", "stance", "confidence", "rationale"],
                 "additionalProperties": False,
             },
         }
@@ -137,6 +148,12 @@ the author expresses a view on, with the direction of their view.
 - Use US tickers (e.g. AAPL, BRK.B). Resolve company names and nicknames to tickers.
 - Use MACRO:<theme> (e.g. MACRO:US_TREASURIES, MACRO:USD, MACRO:OIL) for views \
 on rates, currencies, commodities or the market as a whole.
+- Use SECTOR:<sector> (same key as the sector field) for views on a whole \
+industry without a specific company, e.g. "AI capex is overdone" -> SECTOR:ai_semis.
+- sector is the industry the security or theme belongs to.
+- The text may be a news article *about* the investor rather than their own \
+words; extract only views the article attributes to the investor (or, for \
+industry news, the views the article reports).
 - stance is the author's own view, not the view they are quoting or mocking.
 - confidence reflects how explicit the view is: 0.9 for "we bought X", \
 0.3 for a vague hint. Hedged or ironic statements get lower confidence.
@@ -166,12 +183,20 @@ class ClaudeAnalyzer:
                            "format": {"type": "json_schema", "schema": SIGNAL_SCHEMA}},
             messages=[{"role": "user", "content":
                        f"Author: {post.investor_key}\nDate: {post.published}\n"
-                       f"Source: {post.source}\n\n<post>\n{post.text}\n</post>"}],
+                       f"Source: {post.source} ({post.kind})\n\n<post>\n{post.text}\n</post>"}],
         )
         if response.stop_reason in ("refusal", "max_tokens"):
             return []
         text = next((b.text for b in response.content if b.type == "text"), "")
         data = json.loads(text) if text else {"signals": []}
-        return [Signal(s["ticker"].upper(), Stance(s["stance"]),
-                       max(0.0, min(1.0, float(s["confidence"]))), s["rationale"], post)
+        return [Signal(_norm_ticker(s["ticker"]), Stance(s["stance"]),
+                       max(0.0, min(1.0, float(s["confidence"]))), s["rationale"], post,
+                       s["sector"] if s.get("sector") in SECTORS else "other")
                 for s in data["signals"]]
+
+
+def _norm_ticker(raw: str) -> str:
+    prefix, sep, rest = raw.partition(":")
+    if sep and prefix.upper() == "SECTOR":
+        return f"SECTOR:{rest.lower()}"
+    return raw.upper()

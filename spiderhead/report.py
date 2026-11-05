@@ -54,3 +54,47 @@ def consistency_markdown(items: Iterable[ConsistencyItem]) -> str:
         lines.append(f"| {s.post.published} | {s.ticker} | {s.stance.value} ({s.confidence:.1f}) | "
                      f"{action} | {VERDICT_LABEL[it.verdict]} | {s.rationale.replace('|', '/')} |")
     return "\n".join(lines)
+
+
+STANCE_ICON = {"bullish": "🟢", "bearish": "🔴", "neutral": "⚪"}
+
+
+def _snippet(text: str, n: int = 110) -> str:
+    one = " ".join(text.split()).replace("|", "/")
+    return one if len(one) <= n else one[: n - 1] + "…"
+
+
+def feed_markdown(rows, names: dict[str, str]) -> str:
+    """``rows`` is a list of (Post, [Signal]) newest first."""
+    lines = ["## 大神最新動態", "", "| 日期 | 誰 | 來源 | 內容 | 觀點 |", "|---|---|---|---|---|"]
+    for post, signals in rows:
+        views = " ".join(f"{STANCE_ICON[s.stance.value]}{s.ticker.removeprefix('SECTOR:')}"
+                         for s in signals) or "—"
+        src = "本人" if post.kind == "own" else "報導"
+        link = f"[{post.source}]({post.url})" if post.url else post.source
+        lines.append(f"| {post.published} | {names.get(post.investor_key, post.investor_key)} | "
+                     f"{src}·{link} | {_snippet(post.text)} | {views} |")
+    if len(lines) == 4:
+        lines.append("| — | 這段期間沒有新發文 | | | |")
+    return "\n".join(lines)
+
+
+def trends_markdown(trends, consensus_rows, names: dict[str, str]) -> str:
+    from .sectors import SECTORS
+    lines = ["## 產業熱度", "", "| 產業 | 大神提及 | 產業新聞 | 多空 | 熱度變化 | 誰在談 |",
+             "|---|---|---|---|---|---|"]
+    for t in trends:
+        mood = "🟢 偏多" if t.sentiment > 0.2 else "🔴 偏空" if t.sentiment < -0.2 else "⚪ 中性"
+        chg = "🆕" if t.change_pct is None else f"{t.change_pct:+.0f}%"
+        who = "、".join(sorted(names.get(i, i) for i in t.investors)) or "—"
+        lines.append(f"| {SECTORS.get(t.sector, t.sector)} | {t.investor_posts} | {t.industry_news} | "
+                     f"{mood} ({t.sentiment:+.2f}) | {chg} | {who} |")
+    if len(lines) == 4:
+        lines.append("| — | 尚無資料 | | | | |")
+    lines += ["", "## 多位大神同時在談的標的", ""]
+    if not consensus_rows:
+        lines.append("目前沒有兩位以上大神同時提到的個股。")
+    for c in consensus_rows:
+        views = "、".join(f"{names.get(i, i)} {STANCE_ICON[s.value]}" for i, s in sorted(c.views.items()))
+        lines.append(f"- **{c.ticker}**（{c.investors} 位）：{views}")
+    return "\n".join(lines)
