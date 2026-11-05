@@ -45,6 +45,13 @@ CREATE TABLE IF NOT EXISTS holdings_13f (
     put_call TEXT NOT NULL DEFAULT '', ticker TEXT, issuer TEXT, title TEXT, shares INTEGER,
     value INTEGER, filed TEXT, PRIMARY KEY (investor, quarter, cusip, put_call)
 );
+CREATE TABLE IF NOT EXISTS insider_buys (
+    accession TEXT NOT NULL, ticker TEXT NOT NULL, issuer TEXT, owner TEXT NOT NULL, title TEXT,
+    traded TEXT NOT NULL, filed TEXT NOT NULL, shares REAL NOT NULL, price REAL NOT NULL,
+    PRIMARY KEY (accession, owner, traded, shares, price)
+);
+CREATE INDEX IF NOT EXISTS insider_buys_traded ON insider_buys(traded);
+CREATE TABLE IF NOT EXISTS insider_days (day TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS prices (
     ticker TEXT NOT NULL, day TEXT NOT NULL, close REAL NOT NULL, PRIMARY KEY (ticker, day)
 );
@@ -205,6 +212,29 @@ class Store:
             if ticker:
                 tickers[h.key] = ticker
         return holdings, tickers
+
+    # ------------------------------------------------------------- insider buys
+    def add_insider_buys(self, buys) -> int:
+        cur = self.db.executemany(
+            "INSERT OR IGNORE INTO insider_buys VALUES (?,?,?,?,?,?,?,?,?)",
+            [(b.accession, b.ticker, b.issuer, b.owner, b.title, b.traded.isoformat(),
+              b.filed.isoformat(), b.shares, b.price) for b in buys])
+        self.db.commit()
+        return cur.rowcount
+
+    def insider_buys_between(self, start: date, end: date):
+        from .insiders import InsiderBuy
+        return [InsiderBuy(r[0], r[1], r[2] or "", r[3], r[4] or "", date.fromisoformat(r[5]),
+                           date.fromisoformat(r[6]), r[7], r[8])
+                for r in self.db.execute("SELECT * FROM insider_buys WHERE traded >= ? AND traded <= ?"
+                                         " ORDER BY traded DESC", (start.isoformat(), end.isoformat()))]
+
+    def insider_day_done(self, day: date) -> bool:
+        return self.db.execute("SELECT 1 FROM insider_days WHERE day = ?", (day.isoformat(),)).fetchone() is not None
+
+    def mark_insider_day(self, day: date) -> None:
+        self.db.execute("INSERT OR IGNORE INTO insider_days VALUES (?)", (day.isoformat(),))
+        self.db.commit()
 
     # ------------------------------------------------------------- ARK
     def save_ark(self, fund: str, day: date, rows) -> None:

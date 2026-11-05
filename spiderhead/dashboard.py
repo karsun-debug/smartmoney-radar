@@ -119,7 +119,8 @@ def safe_url(url: str | None) -> str | None:
     return None
 
 
-NAV = [("index.html", "總覽"), ("consensus.html", "大神共同持股"), ("clone.html", "跟單回測")]
+NAV = [("index.html", "總覽"), ("consensus.html", "大神共同持股"), ("clone.html", "跟單回測"),
+       ("insiders.html", "內部人群買")]
 
 
 def _nav(root: str, active: str) -> str:
@@ -426,6 +427,31 @@ def render_clone(results, names: dict[str, str], has_prices: bool) -> str:
     return _page("跟單回測 · Smartmoney Radar", f"<h1>跟單回測</h1>{note}{board}{details}", "", "clone.html")
 
 
+def render_insiders(store: Store, window_days: int = 14, min_insiders: int = 3) -> str:
+    from .insiders import find_clusters
+    end = date.today()
+    start = end - timedelta(days=window_days - 1)
+    clusters = find_clusters(store.insider_buys_between(start, end), min_insiders)
+    note = (f'<p class="sub">最近 {window_days} 天內，同一家公司有 {min_insiders} 位以上不同的內部人（董事、高管、'
+            f'10% 大股東）在公開市場用自己的錢買進，且合計金額超過 10 萬美元。資料來自 SEC 每日 Form 4。</p>')
+    if not clusters:
+        empty = ('<p class="empty">目前沒有符合的群買。執行 <code>spiderhead insiders</code> 掃描 SEC 每日申報。</p>')
+        return _page("內部人群買 · Smartmoney Radar", f"<h1>內部人群買</h1>{note}{empty}", "", "insiders.html")
+    blocks = []
+    for c in clusters:
+        rows = "".join(
+            f'<tr><td>{b.traded}</td><td>{esc(b.owner)}</td><td>{esc(b.title or "—")}</td>'
+            f'<td class="num">{b.shares:,.0f}</td><td class="num">${b.price:,.2f}</td>'
+            f'<td class="num">${b.value / 1e3:,.0f}K</td>'
+            f'<td><a href="{esc(b.url)}" rel="noopener" target="_blank">Form 4</a></td></tr>'
+            for b in sorted(c.buys, key=lambda b: b.traded, reverse=True))
+        blocks.append(f'<h2>{_tick(c.ticker, "")} <span class="sub">{esc(c.issuer)} · {len(c.insiders)} 位內部人 · '
+                      f'合計 ${c.value / 1e6:,.2f}M</span></h2><div class="tablewrap"><table><tr><th>交易日</th>'
+                      f'<th>內部人</th><th>職位</th><th class="num">股數</th><th class="num">價格</th>'
+                      f'<th class="num">金額</th><th>原始申報</th></tr>{rows}</table></div>')
+    return _page("內部人群買 · Smartmoney Radar", f"<h1>內部人群買</h1>{note}{''.join(blocks)}", "", "insiders.html")
+
+
 def render_consensus(c, names: dict[str, str]) -> str:
     if not c.quarters:
         body = ('<h1>大神共同持股</h1><p class="empty">還沒有 13F 歷史資料。執行 '
@@ -680,6 +706,7 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     from .consensus13f import build_consensus
     consensus = build_consensus(store, investors)
     (out / "consensus.html").write_text(render_consensus(consensus, names), encoding="utf-8")
+    (out / "insiders.html").write_text(render_insiders(store), encoding="utf-8")
     from .clone import backtest_all
     clones = backtest_all(store, investors, prices) if prices is not None else []
     (out / "clone.html").write_text(render_clone(clones, names, prices is not None), encoding="utf-8")
@@ -693,6 +720,8 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     tickers |= {t.ticker for t in store.trades_between(start - timedelta(days=90), end) if t.ticker}
     tickers |= {r.key for r in consensus.most_owned(25) + consensus.most_bought() + consensus.most_sold()
                 if r.key.isupper() and len(r.key) <= 6}
+    from .insiders import find_clusters
+    tickers |= {c.ticker for c in find_clusters(store.insider_buys_between(end - timedelta(days=13), end))}
     for t in sorted(tickers):
         (out / "ticker" / f"{_slug(t)}.html").write_text(
             render_ticker(store, t, names, days, prices, consensus), encoding="utf-8")

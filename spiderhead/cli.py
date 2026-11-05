@@ -88,6 +88,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("verify-ciks", help="向 SEC 確認每位大神的 CIK 對應到正確基金")
     sub.add_parser("doctor", help="檢查設定與每個資料來源是否連得上")
 
+    ins = sub.add_parser("insiders", help="全市場內部人群買（3 位以上內部人在公開市場買進）")
+    ins.add_argument("--days", type=int, default=3, help="掃描最近 N 天的 Form 4（已掃過的日子會略過）")
+    ins.add_argument("--window", type=int, default=14, help="群買判定的天數範圍")
+    ins.add_argument("--min-insiders", type=int, default=3)
+    ins.add_argument("--max-filings", type=int, default=3000, help="每天最多解析幾份 Form 4")
+    ins.add_argument("--no-scan", action="store_true", help="只用資料庫裡的資料，不連 SEC")
+
     al = sub.add_parser("alert", help="即時通知：新的喊單或申報交易立刻推 LINE")
     al.add_argument("--dry-run", action="store_true", help="只印出訊息，不送出也不記錄")
     al.add_argument("--backfill", action="store_true", help="第一次執行也送出（預設第一次只記錄不送）")
@@ -178,7 +185,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{inv.key:14} CIK {inv.cik}  expected: {inv.fund:40} SEC: {name}")
         return 0
 
-    if args.cmd in ("fetch", "import", "feed", "trends", "digest", "push-line", "dashboard", "alert"):
+    if args.cmd in ("fetch", "import", "feed", "trends", "digest", "push-line", "dashboard", "alert",
+                    "insiders"):
         return _store_commands(args, investors)
 
     analyzer = None
@@ -245,6 +253,23 @@ def _store_commands(args, investors) -> int:
         if args.cmd == "fetch" and not args.no_trades:
             trades = _collect_trades(investors, max(args.days, 30), store)
             print(f"對帳單：抓到 {len(trades)} 筆，新增 {store.add_trades(trades)} 筆")
+        return 0
+
+    if args.cmd == "insiders":
+        from .health import SourceResult
+        from .insiders import InsiderScanner, find_clusters
+        from .store import window
+        if not args.no_scan:
+            from .edgar import EdgarClient
+            scanner = InsiderScanner(store, EdgarClient(min_interval=0.11).get_text, args.max_filings)
+            n = scanner.scan(args.days)
+            store.log_results([SourceResult("insiders", "form4-daily", len(scanner.errors) < 5, n,
+                                            "; ".join(scanner.errors[:2]))])
+            print(f"新增 {n} 筆內部人公開市場買進")
+        start, end = window(args.window)
+        for c in find_clusters(store.insider_buys_between(start, end), args.min_insiders):
+            print(f"{c.ticker:6} {len(c.insiders)} 位內部人  ${c.value / 1e6:,.2f}M  "
+                  f"{c.first}~{c.last}  {c.issuer}")
         return 0
 
     if args.cmd == "push-line":

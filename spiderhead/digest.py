@@ -27,6 +27,7 @@ class Digest:
     names: dict[str, str]
     trades: list[Trade] = field(default_factory=list)  # filed in the window, newest first
     health: list = field(default_factory=list)          # FamilyStatus per data source
+    clusters: list = field(default_factory=list)        # insider cluster buys, last 14 days
 
 
 def build_digest(store: Store, investors: dict[str, Investor], days: int,
@@ -42,7 +43,13 @@ def build_digest(store: Store, investors: dict[str, Investor], days: int,
         consensus(cur), display_names(investors),
         [t for t in store.trades_between(start, end, by="filed") if t.investor_key in investors],
         store.source_health(),
+        _clusters(store, end),
     )
+
+
+def _clusters(store: Store, end: date):
+    from .insiders import find_clusters
+    return find_clusters(store.insider_buys_between(end - timedelta(days=13), end))
 
 
 def bucket_starts(start: date, end: date, step_days: int) -> list[date]:

@@ -63,6 +63,11 @@ def format_line(d: Digest, dashboard_url: str | None = None, max_posts: int = 8)
         if len(d.trades) > 8:
             out.append(f"…還有 {len(d.trades) - 8} 筆")
 
+    if d.clusters:
+        out += ["", "🏛 內部人群買（14 天內 3 位以上內部人買進）"]
+        for c in d.clusters[:5]:
+            out.append(f"• {c.ticker} {len(c.insiders)} 人 ${c.value / 1e6:,.2f}M　{c.issuer[:30]}")
+
     out += ["", "👤 大神動態"]
     if not d.feed:
         out.append("（沒有新發文）")

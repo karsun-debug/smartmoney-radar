@@ -106,6 +106,10 @@ class EdgarClient:
                                       name=f"{filing.accession}-index-headers.html")
         return self._get(url).text
 
+    def get_text(self, url: str) -> str:
+        """Any EDGAR URL as text, through the rate limiter and User-Agent."""
+        return self._get(url).text
+
     def entity_name(self, cik: str) -> str:
         """Registered name of the entity behind a CIK (for checking the watchlist)."""
         return self._get(SUBMISSIONS_URL.format(cik=str(cik).zfill(10))).json().get("name", "")

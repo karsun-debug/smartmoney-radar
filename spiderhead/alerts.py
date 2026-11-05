@@ -8,7 +8,7 @@ marked as seen) so you don't get flooded with history.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from .digest import display_names
@@ -27,12 +27,14 @@ INIT_MARK = "__alerts_initialized__"   # recorded once the first (silent) run ha
 class Pending:
     posts: list[tuple[Post, list[Signal]]]
     trades: list[Trade]
+    clusters: list = field(default_factory=list)      # insiders.Cluster
 
     def __bool__(self) -> bool:
-        return bool(self.posts or self.trades)
+        return bool(self.posts or self.trades or self.clusters)
 
     def keys(self) -> list[tuple[str, str]]:
-        return [(p.uid, "post") for p, _ in self.posts] + [(t.uid, "trade") for t in self.trades]
+        return ([(p.uid, "post") for p, _ in self.posts] + [(t.uid, "trade") for t in self.trades]
+                + [(c.uid, "cluster") for c in self.clusters])
 
 
 def find_pending(store: Store, investors: dict[str, Investor], lookback_days: int = 3,
@@ -48,9 +50,12 @@ def find_pending(store: Store, investors: dict[str, Investor], lookback_days: in
         if sigs:
             posts.append((p, sigs))
     trades = [t for t in store.trades_between(start, end, by="filed") if t.investor_key in investors]
-    seen = store.alerted([p.uid for p, _ in posts] + [t.uid for t in trades])
+    from .insiders import find_clusters
+    clusters = find_clusters(store.insider_buys_between(end - timedelta(days=13), end))
+    seen = store.alerted([p.uid for p, _ in posts] + [t.uid for t in trades] + [c.uid for c in clusters])
     return Pending([(p, s) for p, s in posts if p.uid not in seen],
-                   [t for t in trades if t.uid not in seen])
+                   [t for t in trades if t.uid not in seen],
+                   [c for c in clusters if c.uid not in seen])
 
 
 def format_alert(pending: Pending, investors: dict[str, Investor], limit: int = 15) -> str:
@@ -66,6 +71,10 @@ def format_alert(pending: Pending, investors: dict[str, Investor], limit: int = 
                   f"  {size} · 交易日 {t.traded:%m/%d} · {FORM.get(t.form, t.form)}"]
         if t.url:
             lines.append(f"  {t.url}")
+    for c in pending.clusters[:5]:
+        lines += ["", f"🏛 內部人群買 {c.ticker}：{len(c.insiders)} 位內部人買進 ${c.value / 1e6:,.2f}M"
+                      f"（{c.first:%m/%d}–{c.last:%m/%d}）",
+                  f"  {c.issuer[:60]}"]
     room = max(0, limit - len(pending.trades))
     for p, sigs in pending.posts[:room]:
         views = " ".join(f"{ICON[s.stance.value]}{signal_label(s.ticker, s.sector)}" for s in sigs[:4])
