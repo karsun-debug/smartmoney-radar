@@ -52,6 +52,15 @@ def run_checks(get: Getter, env: dict[str, str] | None = None) -> list[Check]:
         checks.append(Check(WARN, "LINE token", "未設定 LINE_CHANNEL_ACCESS_TOKEN，不會推播"))
 
     checks.append(_try("Google News", lambda: f"{len(get('https://news.google.com/rss/search?q=%22Bill+Ackman%22&hl=en-US&gl=US&ceid=US:en', {}))} bytes", WARN))
+    def house() -> str:
+        from datetime import date
+        from .house import INDEX_URL, parse_index
+        y = date.today().year
+        rows = parse_index(get(INDEX_URL.format(year=y), {}), y)
+        ptr = [r for r in rows if r.filing_type == "P" and r.filed]
+        newest = max((r.filed for r in ptr), default=None)
+        return f"{y} 年 {len(ptr)} 份交易申報，最新 {newest}"
+    checks.append(_try("眾議院申報 (House Clerk)", house, WARN))
     checks.append(_congress_freshness(get))
     from .ark import ARK_FUNDS
     checks.append(_try("ARK 每日持股", lambda: f"ARKK {len(get(ARK_FUNDS['ARKK'], {}))} bytes", WARN))

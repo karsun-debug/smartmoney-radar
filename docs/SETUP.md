@@ -134,7 +134,8 @@ spiderhead push-line --days 7
 | doctor 顯示 SEC ❌ | 沒設 `SPIDERHEAD_USER_AGENT`，或沒有 email；SEC 會擋。 |
 | LINE token ❌ 401 | token 複製不完整或已重新發行；回 Console 重新 Issue。 |
 | LINE 收不到 | 手機沒加官方帳號好友；或 `LINE_TO` 填成別人的 ID。 |
-| 國會交易 ⚠️ 久未更新 | 資料來自 LuxAlgo 的公開資料集，對方更新不規律時會缺漏。 |
+| 眾議院申報 ⚠️ | 書記處網站暫時連不上時，會自動改用 LuxAlgo 資料集（較慢、可能缺漏）。 |
+| 國會交易 (LuxAlgo) ⚠️ 久未更新 | 只影響參議員與備援；眾議員（如 Pelosi）以書記處為主。 |
 | ARK ⚠️ | ARK 偶爾更改檔名；到 ark-funds.com 找新的 CSV 連結，更新 `spiderhead/ark.py` 的 `ARK_FUNDS`。 |
 | 股價 ⚠️ | Stooq 暫時無法連線時，喊單勝率和個股走勢圖會留空，其餘功能不受影響。 |
 | 排程沒有跑 | 程式還沒合併到 main；或 repo 60 天沒有活動，GitHub 會自動停用排程（到 Actions 重新啟用）。 |

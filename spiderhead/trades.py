@@ -139,18 +139,29 @@ class TradeCollector:
     def collect(self, investors: Iterable[Investor], days: int = 30) -> list[Trade]:
         since = date.today() - timedelta(days=days)
         trades: list[Trade] = []
-        members = {}
+        house, senate = {}, {}
         for inv in investors:
             if inv.handles.get("congress"):
-                members[inv.handles["congress"]] = inv.key
+                chamber = house if inv.handles.get("chamber", "house") == "house" else senate
+                chamber[inv.handles["congress"]] = inv.key
             elif inv.cik and self.edgar is not None:
                 try:
                     trades += self._sec(inv, since)
                 except Exception as exc:
                     self.errors.append(f"sec:{inv.key}: {exc}")
-        if members and self.get is not None:
+        if house and self.get is not None:
+            # Primary: the House Clerk itself. Fallback: LuxAlgo's parsed dataset.
+            from .house import HouseCollector
+            hc = HouseCollector(self.get)
             try:
-                trades += self._congress(members, since)
+                trades += hc.collect(house, since)
+            except Exception as exc:
+                self.errors.append(f"house clerk: {exc}; falling back to LuxAlgo dataset")
+                senate.update(house)
+            self.errors += hc.errors
+        if senate and self.get is not None:
+            try:
+                trades += self._congress(senate, since)
             except Exception as exc:
                 self.errors.append(f"congress: {exc}")
         return trades

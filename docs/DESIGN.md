@@ -127,7 +127,7 @@ Smartmoney Radar 的定位差異：其他專案只看「申報」或只看「貼
 |---|---|---|
 | Form 4 | 持股 >10% 或公司內部人（例：Berkshire 買 OXY） | 交易後 2 個工作日 |
 | Schedule 13D/G | 持股跨過 5%（例：Pershing Square、Third Point 的維權持股） | 13D 5 個工作日 |
-| 國會交易申報（PTR） | 國會議員與配偶（例：Pelosi） | 45 天內（經 LuxAlgo 資料集，更新頻率視對方而定） |
+| 國會交易申報（PTR） | 國會議員與配偶（例：Pelosi） | 45 天內。眾議員直接讀眾議院書記處的年度索引與 PDF（自行解析表格；紙本掃描件會發「提交新申報」通知附 PDF 連結）；參議員與備援用 LuxAlgo 資料集 |
 | ARK 每日持股檔 | Cathie Wood（ARK 各檔 ETF） | 每個交易日 |
 | 13F | 管理資產 > 1 億美元的機構 | 季末後 45 天 |
 

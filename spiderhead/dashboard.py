@@ -29,7 +29,7 @@ VERDICT = {Verdict.CONSISTENT: ("✓", "說到做到", "bull"), Verdict.CONTRADI
            Verdict.HELD: ("–", "持有未動", "neutral"), Verdict.NOT_IN_13F: ("?", "13F 查無", "neutral")}
 PROOF = {"13F": "13F 季報", "13F+daily": "13F + 每日交易", "8-K": "8-K 公告",
          "STOCK Act": "國會交易申報"}
-SIDE = {"buy": ("▲", "買進", "bull"), "sell": ("▼", "賣出", "bear"),
+SIDE = {"buy": ("▲", "買進", "bull"), "sell": ("▼", "賣出", "bear"), "report": ("📄", "提交申報", "neutral"),
         "stake": ("◆", "持股逾 5%", "neutral"), "exchange": ("●", "交換", "neutral")}
 FORM_LABEL = {"4": "Form 4", "4/A": "Form 4/A", "PTR": "國會申報"}
 

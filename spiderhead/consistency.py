@@ -74,7 +74,7 @@ def check_trades(signals: Iterable[Signal], trades: Iterable[Trade],
     """
     by_key: dict[tuple[str, str], list[Trade]] = {}
     for t in trades:
-        if t.ticker:
+        if t.ticker and t.side in ("buy", "sell", "stake"):
             by_key.setdefault((t.investor_key, t.ticker.upper()), []).append(t)
     out = []
     for sig in signals:

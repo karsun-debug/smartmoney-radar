@@ -71,12 +71,17 @@ class FakeEdgar:
 
 def test_trade_collector():
     gz = gzip.compress(json.dumps([ROW]).encode())
-    c = TradeCollector(FakeEdgar(), lambda url, h: gz, lambda name: "HHH" if "Hughes" in name else None)
+
+    def get(url, h):
+        if "disclosures-clerk.house.gov" in url:
+            raise ConnectionError("house clerk down")
+        return gz
+    c = TradeCollector(FakeEdgar(), get, lambda name: "HHH" if "Hughes" in name else None)
     trades = c.collect(load_watchlist().values(), days=60)
     kinds = {(t.investor_key, t.form, t.ticker) for t in trades}
     assert ("ackman", "4", "OXY") in kinds and ("ackman", "SCHEDULE 13D", "HHH") in kinds
-    assert ("pelosi", "PTR", "NVDA") in kinds
-    assert not c.errors
+    assert ("pelosi", "PTR", "NVDA") in kinds                    # via LuxAlgo fallback
+    assert len(c.errors) == 1 and "falling back" in c.errors[0]
 
 
 def test_check_trades_verdicts():

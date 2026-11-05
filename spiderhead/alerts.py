@@ -17,7 +17,8 @@ from .sectors import signal_label
 from .store import Store
 
 ICON = {"bullish": "🟢", "bearish": "🔴", "neutral": "⚪"}
-SIDE = {"buy": "🟢買進", "sell": "🔴賣出", "stake": "🔷持股逾5%", "exchange": "⚪交換"}
+SIDE = {"buy": "🟢買進", "sell": "🔴賣出", "stake": "🔷持股逾5%", "exchange": "⚪交換",
+        "report": "📄提交申報"}
 FORM = {"4": "Form 4", "PTR": "國會申報", "ARK daily": "ARK 每日持股"}
 
 

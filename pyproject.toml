@@ -3,7 +3,7 @@ name = "spiderhead"
 version = "0.1.0"
 description = "Track famous US investors' public posts against their SEC filings"
 requires-python = ">=3.10"
-dependencies = ["requests>=2.31"]
+dependencies = ["requests>=2.31", "pypdf>=4"]
 
 [project.optional-dependencies]
 llm = ["anthropic>=2.5"]
