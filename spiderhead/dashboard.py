@@ -318,6 +318,44 @@ def health_table(statuses) -> str:
             + "".join(rows) + '</table></div>')
 
 
+def holdings_from_store(store: Store, inv: Investor):
+    """(quarter, changes, 13F say/do checks, quarter summaries) from stored 13F history."""
+    from .consistency import check
+    from .holdings import diff_holdings, summarize_quarter
+    quarters = store.quarters_13f(inv.key)
+    if len(quarters) < 2:
+        return None
+    loaded = {q: store.load_13f(inv.key, q) for q in quarters}
+    curr, curr_t = loaded[quarters[0]]
+    prev, prev_t = loaded[quarters[1]]
+    tickers = {**prev_t, **curr_t}
+    resolve = lambda h: tickers.get(h.key)  # noqa: E731
+    changes = diff_holdings(prev, curr, resolve)
+    q_end = date.fromisoformat(quarters[0])
+    q_start = date(q_end.year, q_end.month - 2, 1)
+    sigs = [s for p in store.posts_between(q_start, q_end, inv.key, kinds=("own", "news"))
+            for s in store.signals_for(p) if s.is_own_view]
+    history = [summarize_quarter(q, loaded[q][0], lambda h, t=loaded[q][1]: t.get(h.key))
+               for q in quarters]
+    return quarters[0], changes, check(sigs, changes), history
+
+
+def history_html(history) -> str:
+    if not history:
+        return ""
+    vmax = max(h.total_value for h in history) or 1
+    rows = "".join(
+        f'<tr><td>{esc(h.quarter)}</td><td class="num">${h.total_value / 1e9:,.2f}B'
+        f'<div class="track" style="height:6px;margin-top:4px"><div style="height:6px;border-radius:0 3px 3px 0;'
+        f'background:var(--series);width:{h.total_value / vmax * 100:.1f}%"></div></div></td>'
+        f'<td class="num">{h.positions}</td><td>'
+        + "、".join(f"{esc(label)} {w * 100:.1f}%" for label, w in h.top) + "</td></tr>"
+        for h in history)
+    return ('<h3>各季持倉概況</h3><div class="tablewrap"><table><tr><th>季度</th>'
+            '<th class="num">13F 申報市值</th><th class="num">持股數</th><th>前五大持股</th></tr>'
+            f'{rows}</table></div>')
+
+
 def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
                   prices: PriceBook | None) -> str:
     start, end = window(days)
@@ -452,17 +490,22 @@ def render_investor(store: Store, inv: Investor, names: dict[str, str], days: in
                  f'<th class="num">▼ 看空</th><th class="num">● 中性</th></tr>{tick_html}</table></div>'
                  if tick_rows else '<p class="empty">這段期間沒有提到個股。</p>')
 
+    if holdings is None:
+        holdings = holdings_from_store(store, inv)
     if holdings:
-        quarter, changes, items = holdings
+        quarter, changes, items = holdings[:3]
+        history = holdings[3] if len(holdings) > 3 else []
         moves = [c for c in changes if c.change is not ChangeType.HOLD][:15]
         hrows = "".join(
             f'<tr><td>{esc(CHANGE[c.change])}</td><td>{esc(c.ticker or c.issuer)}'
             f'{" (" + esc(c.put_call) + ")" if c.put_call else ""}</td>'
             f'<td class="num">{c.prev_shares:,} → {c.curr_shares:,}</td>'
             f'<td class="num">{c.portfolio_weight * 100:.2f}%</td></tr>' for c in moves)
-        h13 = (f'<p class="sub">申報季度 {esc(quarter)}，依交易金額排序。</p><div class="tablewrap"><table>'
-               f'<tr><th>動作</th><th>標的</th><th class="num">股數</th><th class="num">占組合</th></tr>'
-               f'{hrows}</table></div>')
+        h13 = history_html(history)
+        h13 += (f'<h3 style="margin-top:16px">最新一季變動（{esc(quarter)}，依交易金額排序）</h3>'
+                f'<div class="tablewrap"><table>'
+                f'<tr><th>動作</th><th>標的</th><th class="num">股數</th><th class="num">占組合</th></tr>'
+                f'{hrows}</table></div>')
         if items:
             crow = "".join(
                 f'<tr><td>{it.signal.post.published}</td><td>{esc(it.signal.ticker)}</td>'

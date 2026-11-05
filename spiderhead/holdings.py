@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 
 from .models import ChangeType, Holding, PositionChange
 
@@ -166,3 +167,23 @@ class OpenFigi:
             return None
         rows = (data[0] or {}).get("data") or [] if data else []
         return rows[0].get("ticker", "").upper() or None if rows else None
+
+
+@dataclass(frozen=True)
+class QuarterSummary:
+    quarter: str
+    total_value: int
+    positions: int
+    top: list[tuple[str, float]]      # (label, weight 0..1), largest first
+
+
+def summarize_quarter(quarter: str, holdings: Iterable[Holding],
+                      resolve: Callable[[Holding], str | None] | None = None,
+                      top_n: int = 5) -> QuarterSummary:
+    hs = [h for h in holdings if h.value_usd > 0]
+    total = sum(h.value_usd for h in hs) or 1
+    ranked = sorted(hs, key=lambda h: -h.value_usd)[:top_n]
+    top = [((resolve(h) if resolve else None) or h.issuer) + (f" ({h.put_call})" if h.put_call else "")
+           for h in ranked]
+    return QuarterSummary(quarter, sum(h.value_usd for h in hs), len(hs),
+                          [(label, h.value_usd / total) for label, h in zip(top, ranked)])

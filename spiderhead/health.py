@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 FAMILY_NAMES = {
     "x": "X 貼文", "rss": "RSS", "news": "大神新聞", "industry": "產業新聞",
-    "sec": "SEC 申報（Form 4 / 13D / 8-K）", "house": "眾議院申報", "congress": "國會交易（LuxAlgo）",
+    "sec": "SEC 申報（Form 4 / 13D / 8-K）", "sec13f": "SEC 13F 季報", "house": "眾議院申報", "congress": "國會交易（LuxAlgo）",
     "ark": "ARK 每日持股", "prices": "股價",
 }
 

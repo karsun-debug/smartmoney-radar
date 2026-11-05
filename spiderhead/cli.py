@@ -102,7 +102,8 @@ def main(argv: list[str] | None = None) -> int:
     db = sub.add_parser("dashboard", help="產生網頁儀表板（靜態 HTML）")
     db.add_argument("--out", default="site", help="輸出資料夾")
     db.add_argument("--days", type=int, default=90)
-    db.add_argument("--with-13f", action="store_true", help="從 EDGAR 抓最新 13F 放進大神頁面")
+    db.add_argument("--with-13f", action="store_true",
+                    help="先從 EDGAR 更新最近 4 季 13F（已抓過的季度會略過）")
     db.add_argument("--no-prices", action="store_true", help="不抓股價（喊單勝率與個股走勢圖會留空）")
 
     f = sub.add_parser("fetch", help="自動抓取大神發文與產業新聞，存進資料庫並分析")
@@ -277,14 +278,14 @@ def _store_commands(args, investors) -> int:
 
     if args.cmd == "dashboard":
         from .dashboard import build_site
-        holdings = _holdings_for_dashboard(store, investors) if args.with_13f else None
+        if args.with_13f:
+            _refresh_13f(store, investors)
         prices = None
         if not args.no_prices:
             from .performance import PriceBook
             from .sources import _requests_get
             prices = PriceBook(store, _requests_get)
-        index = build_site(store, investors, args.out, days=args.days, holdings=holdings,
-                           prices=prices)
+        index = build_site(store, investors, args.out, days=args.days, prices=prices)
         for err in (prices.errors if prices else [])[:3]:
             print(f"warning: {err}", file=sys.stderr)
         if prices is not None:
@@ -307,32 +308,39 @@ def _store_commands(args, investors) -> int:
     return 0
 
 
-def _holdings_for_dashboard(store, investors):
-    """Latest 13F diff + say/do check for every 13F filer; failures are skipped."""
+def _refresh_13f(store, investors, quarters: int = 4) -> None:
+    """Download the last few 13F quarters for every filer into the store.
+
+    Quarters already stored with the same accession number are skipped, so a
+    daily run only downloads new filings (or amendments).
+    """
     from .edgar import EdgarClient
-    out = {}
-    analyzer = KeywordAnalyzer(names=_name_map(investors))
+    from .health import SourceResult
     try:
         client = EdgarClient()
-        resolver = _sec_resolver(client)          # one download, shared by every investor
     except Exception as exc:
         print(f"warning: 13F skipped: {exc}", file=sys.stderr)
-        return out
+        return
+    resolver, results = None, []
     for inv in investors.values():
         if not inv.files_13f:
             continue
         try:
-            quarter, changes = _changes_from_edgar(inv, client, resolver)
+            new = 0
+            for f in client.latest_13f_per_quarter(inv.cik, quarters=quarters):
+                q = str(f.report_date)
+                if store.accession_13f(inv.key, q) == f.accession:
+                    continue
+                if resolver is None:
+                    resolver = _sec_resolver(client)     # one download, shared by everyone
+                store.save_13f(inv.key, q, f.accession,
+                               parse_infotable(client.fetch_infotable_xml(f)), resolver)
+                new += 1
+            results.append(SourceResult("sec13f", inv.key, True, new))
         except Exception as exc:
             print(f"warning: 13F {inv.key}: {exc}", file=sys.stderr)
-            continue
-        q_end = date.fromisoformat(quarter)
-        q_start = date(q_end.year, q_end.month - 2, 1)   # first day of that quarter
-        posts = store.posts_between(q_start, q_end, inv.key, kinds=("own", "news"))
-        signals = [s for p in posts for s in (store.signals_for(p) or analyzer.analyze(p))
-                   if s.is_own_view]
-        out[inv.key] = (quarter, changes, check(signals, changes))
-    return out
+            results.append(SourceResult("sec13f", inv.key, False, 0, str(exc)))
+    store.log_results(results)
 
 
 def _collect_trades(investors, days: int, store=None):

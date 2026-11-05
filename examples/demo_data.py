@@ -81,6 +81,16 @@ def main(days: int = 90, seed: int = 7) -> None:
         Trade("burry", today - timedelta(days=8), today - timedelta(days=6), "sell", "4", "BABA", "Alibaba"),
     ]
     store.add_trades(trades)
+
+    # Two synthetic 13F quarters for Buffett (the test fixtures), for the history table.
+    from pathlib import Path
+    from spiderhead.holdings import TickerResolver, parse_infotable
+    fix = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
+    tick = TickerResolver({"037833100": "AAPL", "060505104": "BAC", "191216100": "KO",
+                           "833445109": "SNOW", "78462F103": "SPY"}, {"Chubb Ltd": "CB"})
+    q2, q3 = f"{today.year}-06-30", f"{today.year}-09-30"
+    store.save_13f("buffett", q2, "demo-q2", parse_infotable((fix / "prev_q.xml").read_bytes()), tick)
+    store.save_13f("buffett", q3, "demo-q3", parse_infotable((fix / "curr_q.xml").read_bytes()), tick)
     print(f"demo posts: {len(posts)}, trades: {len(trades)}")
 
 

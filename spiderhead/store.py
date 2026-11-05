@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS source_runs (
     items INTEGER NOT NULL DEFAULT 0, detail TEXT
 );
 CREATE INDEX IF NOT EXISTS source_runs_family ON source_runs(family, at);
+CREATE TABLE IF NOT EXISTS holdings_13f (
+    investor TEXT NOT NULL, quarter TEXT NOT NULL, accession TEXT NOT NULL, cusip TEXT NOT NULL,
+    put_call TEXT NOT NULL DEFAULT '', ticker TEXT, issuer TEXT, title TEXT, shares INTEGER,
+    value INTEGER, PRIMARY KEY (investor, quarter, cusip, put_call)
+);
 CREATE TABLE IF NOT EXISTS prices (
     ticker TEXT NOT NULL, day TEXT NOT NULL, close REAL NOT NULL, PRIMARY KEY (ticker, day)
 );
@@ -152,6 +157,40 @@ class Store:
     def prices(self, ticker: str) -> list[tuple[date, float]]:
         return [(date.fromisoformat(d), c) for d, c in self.db.execute(
             "SELECT day, close FROM prices WHERE ticker = ? ORDER BY day", (ticker,))]
+
+    # ------------------------------------------------------------- 13F history
+    def save_13f(self, investor: str, quarter: str, accession: str, holdings,
+                 resolve=None) -> None:
+        """Replace one quarter's 13F holdings (tickers resolved once, at save time)."""
+        self.db.execute("DELETE FROM holdings_13f WHERE investor = ? AND quarter = ?", (investor, quarter))
+        self.db.executemany(
+            "INSERT OR REPLACE INTO holdings_13f VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [(investor, quarter, accession, h.cusip, h.put_call or "", resolve(h) if resolve else None,
+              h.issuer, h.title_of_class, h.shares, h.value_usd) for h in holdings])
+        self.db.commit()
+
+    def accession_13f(self, investor: str, quarter: str) -> str | None:
+        r = self.db.execute("SELECT accession FROM holdings_13f WHERE investor = ? AND quarter = ? LIMIT 1",
+                            (investor, quarter)).fetchone()
+        return r[0] if r else None
+
+    def quarters_13f(self, investor: str) -> list[str]:
+        """Stored quarters, newest first."""
+        return [r[0] for r in self.db.execute(
+            "SELECT DISTINCT quarter FROM holdings_13f WHERE investor = ? ORDER BY quarter DESC", (investor,))]
+
+    def load_13f(self, investor: str, quarter: str):
+        """(holdings, {cusip/put_call key: ticker}) for one stored quarter."""
+        from .models import Holding
+        holdings, tickers = [], {}
+        for cusip, pc, ticker, issuer, title, shares, value in self.db.execute(
+                "SELECT cusip, put_call, ticker, issuer, title, shares, value FROM holdings_13f"
+                " WHERE investor = ? AND quarter = ?", (investor, quarter)):
+            h = Holding(issuer or "", cusip, title or "", value or 0, shares or 0, "SH", pc or None)
+            holdings.append(h)
+            if ticker:
+                tickers[h.key] = ticker
+        return holdings, tickers
 
     # ------------------------------------------------------------- ARK
     def save_ark(self, fund: str, day: date, rows) -> None:
