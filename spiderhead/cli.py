@@ -95,6 +95,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("verify-ciks", help="向 SEC 確認每位大神的 CIK 對應到正確基金")
     sub.add_parser("doctor", help="檢查設定與每個資料來源是否連得上")
 
+    wk = sub.add_parser("weekly", help="產生大神週報（加 --llm 由 Claude 撰寫）")
+    wk.add_argument("--llm", action="store_true")
+    wk.add_argument("--push", action="store_true", help="推播到所有已設定的管道")
+    wk.add_argument("--out", help="同時寫成 Markdown 檔")
+
     ins = sub.add_parser("insiders", help="全市場內部人群買（3 位以上內部人在公開市場買進）")
     ins.add_argument("--days", type=int, default=3, help="掃描最近 N 天的 Form 4（已掃過的日子會略過）")
     ins.add_argument("--window", type=int, default=14, help="群買判定的天數範圍")
@@ -197,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "push":
         args.cmd = "push-line"
     if args.cmd in ("fetch", "import", "feed", "trends", "digest", "push-line", "dashboard", "alert",
-                    "insiders"):
+                    "insiders", "weekly"):
         return _store_commands(args, investors)
 
     analyzer = None
@@ -273,6 +278,22 @@ def _store_commands(args, investors) -> int:
             trades = _collect_trades(investors, max(args.days, 30), store)
             print(f"對帳單：抓到 {len(trades)} 筆，新增 {store.add_trades(trades)} 筆")
         return 0
+
+    if args.cmd == "weekly":
+        from .weekly import claude_report, gather, template_report
+        w = gather(store, investors)
+        author = "template"
+        text = template_report(w)
+        if args.llm:
+            try:
+                text, author = claude_report(w), "claude"
+            except Exception as exc:
+                print(f"warning: Claude 週報失敗，改用範本：{exc}", file=sys.stderr)
+        store.save_report(w.start, w.end, text, author)
+        if args.out:
+            Path(args.out).write_text(text, encoding="utf-8")
+        print(text)
+        return _broadcast(text) if args.push else 0
 
     if args.cmd == "insiders":
         from .health import SourceResult

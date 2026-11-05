@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS insider_buys (
 );
 CREATE INDEX IF NOT EXISTS insider_buys_traded ON insider_buys(traded);
 CREATE TABLE IF NOT EXISTS insider_days (day TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS reports (
+    period_end TEXT PRIMARY KEY, period_start TEXT NOT NULL, text TEXT NOT NULL,
+    author TEXT NOT NULL, created TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS prices (
     ticker TEXT NOT NULL, day TEXT NOT NULL, close REAL NOT NULL, PRIMARY KEY (ticker, day)
 );
@@ -238,6 +242,19 @@ class Store:
     def mark_insider_day(self, day: date) -> None:
         self.db.execute("INSERT OR IGNORE INTO insider_days VALUES (?)", (day.isoformat(),))
         self.db.commit()
+
+    # ------------------------------------------------------------- weekly reports
+    def save_report(self, start: date, end: date, text: str, author: str) -> None:
+        self.db.execute("INSERT OR REPLACE INTO reports VALUES (?,?,?,?,?)",
+                        (end.isoformat(), start.isoformat(), text, author,
+                         datetime.now().isoformat(timespec="seconds")))
+        self.db.commit()
+
+    def reports(self, limit: int = 12) -> list[tuple[date, date, str, str]]:
+        """(start, end, text, author), newest first."""
+        return [(date.fromisoformat(r[1]), date.fromisoformat(r[0]), r[2], r[3]) for r in self.db.execute(
+            "SELECT period_end, period_start, text, author FROM reports ORDER BY period_end DESC LIMIT ?",
+            (limit,))]
 
     # ------------------------------------------------------------- ARK
     def save_ark(self, fund: str, day: date, rows) -> None:

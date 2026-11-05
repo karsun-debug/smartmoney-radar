@@ -122,7 +122,7 @@ def safe_url(url: str | None) -> str | None:
 
 
 NAV = [("index.html", "總覽"), ("consensus.html", "大神共同持股"), ("clone.html", "跟單回測"),
-       ("insiders.html", "內部人群買"), ("retail.html", "散戶 vs 大神")]
+       ("insiders.html", "內部人群買"), ("retail.html", "散戶 vs 大神"), ("weekly.html", "週報")]
 
 
 def _nav(root: str, active: str) -> str:
@@ -491,6 +491,21 @@ def render_retail(store: Store, names: dict[str, str], days: int = 7) -> str:
     return _page("散戶 vs 大神 · Smartmoney Radar", f"<h1>散戶 vs 大神</h1>{note}{table}", "", "retail.html")
 
 
+def render_weekly(store: Store) -> str:
+    from .weekly import markdown_to_html
+    reps = store.reports()
+    if not reps:
+        body = '<h1>週報</h1><p class="empty">還沒有週報。執行 <code>spiderhead weekly --llm</code>。</p>'
+        return _page("週報 · Smartmoney Radar", body, "", "weekly.html")
+    start, end, text, author = reps[0]
+    by = "Claude 撰寫" if author == "claude" else "自動範本"
+    archive = "".join(f'<details><summary>{s} ～ {e}</summary><div class="card">{markdown_to_html(t)}</div></details>'
+                      for s, e, t, _ in reps[1:])
+    body = (f'<p class="sub">{start} ～ {end} · {by}</p><div class="card">{markdown_to_html(text)}</div>'
+            + (f"<h2>過去週報</h2>{archive}" if archive else ""))
+    return _page("週報 · Smartmoney Radar", body, "", "weekly.html")
+
+
 def render_consensus(c, names: dict[str, str]) -> str:
     if not c.quarters:
         body = ('<h1>大神共同持股</h1><p class="empty">還沒有 13F 歷史資料。執行 '
@@ -747,6 +762,7 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     (out / "consensus.html").write_text(render_consensus(consensus, names), encoding="utf-8")
     (out / "insiders.html").write_text(render_insiders(store), encoding="utf-8")
     (out / "retail.html").write_text(render_retail(store, names), encoding="utf-8")
+    (out / "weekly.html").write_text(render_weekly(store), encoding="utf-8")
     from .clone import backtest_all
     clones = backtest_all(store, investors, prices) if prices is not None else []
     (out / "clone.html").write_text(render_clone(clones, names, prices is not None), encoding="utf-8")
