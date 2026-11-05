@@ -152,3 +152,37 @@ def test_trades_in_line_and_dashboard(tmp_path):
     page = (tmp_path / "investor" / "pelosi.html").read_text(encoding="utf-8")
     assert "即時對帳單" in page and "說到做到" in page and "國會申報" in page
     assert (tmp_path / "ticker" / "NVDA.html").exists()
+
+
+def test_attributed_news_counts_as_own_call():
+    ka = KeywordAnalyzer()
+    quoted = Post("ackman", TODAY, "Bill Ackman says he bought $GOOGL, calls it undervalued - Reuters",
+                  "news", None, "news")
+    opinion = Post("ackman", TODAY, "Why $GOOGL may be cheap now, analysts note (mentions Ackman fund)",
+                   "news", None, "news")
+    assert all(s.attributed and s.is_own_view for s in ka.analyze(quoted))
+    assert not any(s.attributed for s in ka.analyze(opinion))
+    store = Store(":memory:")
+    store.add_posts([quoted, opinion])
+    for p in store.unanalyzed():
+        store.save_signals(p, ka.analyze(p))
+    flags = sorted(s.attributed for s in store.signals_between(TODAY, TODAY) if s.ticker == "GOOGL")
+    assert flags == [False, True]                              # persisted
+    feeds = {"googl.us": _prices_csv(TODAY - timedelta(days=5), 6, 100, 1)}
+    pb = PriceBook(store, lambda url, h: feeds[url.split("s=")[1].split("&")[0]])
+    [res] = score_calls(store.signals_between(TODAY, TODAY), pb)
+    assert res.signal.attributed
+
+
+def test_store_migrates_old_signals_table(tmp_path):
+    import sqlite3
+    db = tmp_path / "old.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE signals (post_uid TEXT NOT NULL, ticker TEXT NOT NULL, sector TEXT,"
+                " stance TEXT NOT NULL, confidence REAL, rationale TEXT)")
+    con.execute("INSERT INTO signals VALUES ('x','AAPL','consumer','bullish',0.9,'r')")
+    con.commit()
+    con.close()
+    store = Store(db)
+    cols = {r[1] for r in store.db.execute("PRAGMA table_info(signals)")}
+    assert "attributed" in cols

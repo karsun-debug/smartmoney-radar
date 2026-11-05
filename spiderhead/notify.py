@@ -67,7 +67,7 @@ def format_line(d: Digest, dashboard_url: str | None = None, max_posts: int = 8)
     if not d.feed:
         out.append("（沒有新發文）")
     for post, sigs in d.feed[:max_posts]:
-        tag = "本人" if post.kind == "own" else "報導"
+        tag = "本人" if post.kind == "own" else "引述本人" if any(s.attributed for s in sigs) else "報導"
         views = " ".join(f"{ICON[s.stance.value]}{signal_label(s.ticker, s.sector)}" for s in sigs[:4])
         out.append(f"• {d.names.get(post.investor_key, post.investor_key)}（{tag}·{post.source}）"
                    f"{post.published:%m/%d}\n  {_short(post.text, 90)}" + (f"\n  {views}" if views else ""))

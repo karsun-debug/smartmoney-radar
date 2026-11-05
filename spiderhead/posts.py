@@ -83,11 +83,39 @@ BEARISH = ("sell", "sold", "short", "exited", "overvalued", "bubble", "bearish",
            "trimmed", "reduced", "puts on", "bought puts", "avoid", "downside")
 
 
-class KeywordAnalyzer:
-    """Cashtag + keyword heuristic. ``aliases`` maps names to tickers, e.g. {"apple": "AAPL"}."""
+ATTRIB_VERBS = ("says", "said", "say", "buys", "bought", "buying", "sells", "sold", "selling",
+                "bets", "betting", "warns", "warned", "calls", "called", "adds", "added", "adding",
+                "dumps", "dumped", "exits", "exited", "trims", "trimmed", "slashes", "boosts",
+                "shorts", "shorting", "predicts", "reveals", "discloses", "takes", "unveils",
+                "likes", "loves", "is bullish", "is bearish", "thinks", "believes", "sees")
 
-    def __init__(self, aliases: dict[str, str] | None = None):
+
+class KeywordAnalyzer:
+    """Cashtag + keyword heuristic. ``aliases`` maps names to tickers, e.g. {"apple": "AAPL"}.
+
+    ``names`` maps investor keys to full names; a news item counts as the
+    investor's own view when it says "<surname> says/buys/sells/bets ...".
+    """
+
+    def __init__(self, aliases: dict[str, str] | None = None, names: dict[str, str] | None = None):
         self.aliases = {k.lower(): v.upper() for k, v in (aliases or {}).items()}
+        if names is None:
+            from .watchlist import DEFAULT_WATCHLIST
+            names = {i.key: i.name for i in DEFAULT_WATCHLIST}
+        self.surnames = {k: {k.lower(), v.split()[-1].lower()} for k, v in names.items()}
+        verbs = "|".join(re.escape(v) for v in ATTRIB_VERBS)
+        self._verbs = verbs
+
+    def attributed(self, post: Post) -> bool:
+        if post.kind == "own":
+            return True
+        if post.kind != "news":
+            return False
+        for sur in self.surnames.get(post.investor_key, {post.investor_key.lower()}):
+            if re.search(rf"\b{re.escape(sur)}\b(?:'s)?[^.!?]{{0,60}}?\b(?:{self._verbs})\b",
+                         post.text, re.I):
+                return True
+        return False
 
     def analyze(self, post: Post) -> list[Signal]:
         text = post.text
@@ -105,13 +133,14 @@ class KeywordAnalyzer:
             stance = Stance.NEUTRAL
         conf = 0.0 if stance is Stance.NEUTRAL else min(0.9, 0.4 + 0.15 * abs(bull - bear))
         why = f"keywords bull={bull} bear={bear}"
-        signals = [Signal(t, stance, conf, why, post, sector_for(t, text))
+        own = self.attributed(post) and post.kind == "news"
+        signals = [Signal(t, stance, conf, why, post, sector_for(t, text), own)
                    for t in sorted(tickers)]
         # Industry-level views ("AI capex is a bubble") with no specific ticker.
         covered = {s.sector for s in signals}
         for sec in classify_text(text):
             if sec != "other" and sec not in covered:
-                signals.append(Signal(f"SECTOR:{sec}", stance, conf * 0.8, why, post, sec))
+                signals.append(Signal(f"SECTOR:{sec}", stance, conf * 0.8, why, post, sec, own))
         return signals
 
 
@@ -127,12 +156,15 @@ SIGNAL_SCHEMA = {
                                "description": "US ticker in caps, MACRO:<theme> for macro views, "
                                               "or SECTOR:<sector> for industry-wide views"},
                     "sector": {"type": "string", "enum": list(SECTORS)},
+                    "attributed": {"type": "boolean",
+                                   "description": "True when this is the named investor's own view "
+                                                  "or trade (their words, letter, interview, filing)"},
                     "stance": {"type": "string", "enum": ["bullish", "bearish", "neutral"]},
                     "confidence": {"type": "number"},
                     "rationale": {"type": "string",
                                   "description": "One sentence, quoting the post where possible"},
                 },
-                "required": ["ticker", "sector", "stance", "confidence", "rationale"],
+                "required": ["ticker", "sector", "stance", "confidence", "rationale", "attributed"],
                 "additionalProperties": False,
             },
         }
@@ -154,6 +186,8 @@ industry without a specific company, e.g. "AI capex is overdone" -> SECTOR:ai_se
 - The text may be a news article *about* the investor rather than their own \
 words; extract only views the article attributes to the investor (or, for \
 industry news, the views the article reports).
+- attributed is true only when the view is the investor's own (they said it, wrote \
+it, or traded it); false for the journalist's or other people's opinions.
 - stance is the author's own view, not the view they are quoting or mocking.
 - confidence reflects how explicit the view is: 0.9 for "we bought X", \
 0.3 for a vague hint. Hedged or ironic statements get lower confidence.
@@ -191,7 +225,8 @@ class ClaudeAnalyzer:
         data = json.loads(text) if text else {"signals": []}
         return [Signal(_norm_ticker(s["ticker"]), Stance(s["stance"]),
                        max(0.0, min(1.0, float(s["confidence"]))), s["rationale"], post,
-                       s["sector"] if s.get("sector") in SECTORS else "other")
+                       s["sector"] if s.get("sector") in SECTORS else "other",
+                       bool(s.get("attributed")) and post.kind == "news")
                 for s in data["signals"]]
 
 

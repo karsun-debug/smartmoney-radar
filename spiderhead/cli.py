@@ -161,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
 
     analyzer = None
     if args.cmd in ("posts", "report"):
-        analyzer = ClaudeAnalyzer() if args.llm else KeywordAnalyzer()
+        analyzer = ClaudeAnalyzer() if args.llm else KeywordAnalyzer(names=_name_map(investors))
 
     if args.cmd == "posts":
         for post in load_posts_json(args.posts_file):
@@ -202,7 +202,7 @@ def _store_commands(args, investors) -> int:
     from .store import Store
     store = Store()
     if args.cmd in ("fetch", "import"):
-        analyzer = ClaudeAnalyzer() if args.llm else KeywordAnalyzer()
+        analyzer = ClaudeAnalyzer() if args.llm else KeywordAnalyzer(names=_name_map(investors))
         if args.cmd == "fetch":
             from .sources import Collector, load_sources
             collector = Collector(load_sources(investors, args.sources))
@@ -281,7 +281,7 @@ def _holdings_for_dashboard(store, investors):
     """Latest 13F diff + say/do check for every 13F filer; failures are skipped."""
     from .store import window
     out = {}
-    analyzer = KeywordAnalyzer()
+    analyzer = KeywordAnalyzer(names=_name_map(investors))
     for inv in investors.values():
         if not inv.files_13f:
             continue
@@ -292,8 +292,9 @@ def _holdings_for_dashboard(store, investors):
             continue
         q_end = date.fromisoformat(quarter)
         q_start = date(q_end.year, q_end.month - 2, 1)   # first day of that quarter
-        posts = store.posts_between(q_start, q_end, inv.key, kinds=("own",))
-        signals = [s for p in posts for s in (store.signals_for(p) or analyzer.analyze(p))]
+        posts = store.posts_between(q_start, q_end, inv.key, kinds=("own", "news"))
+        signals = [s for p in posts for s in (store.signals_for(p) or analyzer.analyze(p))
+                   if s.is_own_view]
         out[inv.key] = (quarter, changes, check(signals, changes))
     return out
 
@@ -330,3 +331,7 @@ def _collect_trades(investors, days: int, store=None):
     for err in errors:
         print(f"warning: {err}", file=sys.stderr)
     return trades
+
+
+def _name_map(investors) -> dict[str, str]:
+    return {k: v.name for k, v in investors.items()}

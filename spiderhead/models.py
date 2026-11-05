@@ -109,6 +109,12 @@ class Signal:
     rationale: str
     post: Post
     sector: str = "other"  # key of spiderhead.sectors.SECTORS
+    attributed: bool = False  # news item quoting the investor's own view or trade
+
+    @property
+    def is_own_view(self) -> bool:
+        """The investor's own call: their post, or a report of what *they* said/did."""
+        return self.post.kind == "own" or self.attributed
 
 
 class Verdict(str, Enum):

@@ -37,14 +37,13 @@ class Pending:
 def find_pending(store: Store, investors: dict[str, Investor], lookback_days: int = 3,
                  min_confidence: float = 0.5, include_news: bool = False) -> Pending:
     start, end = date.today() - timedelta(days=lookback_days), date.today()
-    kinds = ("own", "news") if include_news else ("own",)
     posts = []
-    for p in store.posts_between(start, end, kinds=kinds):
+    for p in store.posts_between(start, end, kinds=("own", "news")):
         if p.investor_key not in investors:
             continue
         sigs = [s for s in store.signals_for(p)
                 if s.confidence >= min_confidence and not s.ticker.startswith("SECTOR:")
-                and s.stance.value != "neutral"]
+                and s.stance.value != "neutral" and (include_news or s.is_own_view)]
         if sigs:
             posts.append((p, sigs))
     trades = [t for t in store.trades_between(start, end, by="filed") if t.investor_key in investors]

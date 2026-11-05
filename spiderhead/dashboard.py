@@ -181,7 +181,8 @@ def _feed_html(rows: list[tuple[Post, list[Signal]]], names: dict[str, str], roo
         who = esc(names.get(post.investor_key, post.investor_key))
         if link_investor:
             who = f'<a href="{root}investor/{esc(post.investor_key)}.html">{who}</a>'
-        src = "本人發言" if post.kind == "own" else "相關報導"
+        src = ("本人發言" if post.kind == "own" else
+               "報導·引述本人" if any(s.attributed for s in sigs) else "相關報導")
         link = f' · <a href="{esc(post.url)}" rel="noopener" target="_blank">原文</a>' if post.url else ""
         badges = " ".join(_badge(s.stance.value, signal_label(s.ticker, s.sector)) for s in sigs[:6])
         text = post.text if len(post.text) <= 400 else post.text[:399] + "…"
@@ -451,7 +452,7 @@ def render_investor(store: Store, inv: Investor, names: dict[str, str], days: in
 
     trades = store.trades_between(start - timedelta(days=90), end, inv.key)
     trades_html = trades_table(trades, names, "../", show_who=False)
-    own_sigs = [sg for p, sigs in prof.posts if p.kind == "own" for sg in sigs]
+    own_sigs = [sg for p, sigs in prof.posts for sg in sigs if sg.is_own_view]
     checks = check_trades(own_sigs, trades)
     my_calls = [c for c in (calls or []) if c.signal.post.investor_key == inv.key]
 

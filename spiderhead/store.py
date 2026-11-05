@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS posts (
 CREATE INDEX IF NOT EXISTS posts_published ON posts(published);
 CREATE TABLE IF NOT EXISTS signals (
     post_uid TEXT NOT NULL REFERENCES posts(uid), ticker TEXT NOT NULL,
-    sector TEXT, stance TEXT NOT NULL, confidence REAL, rationale TEXT
+    sector TEXT, stance TEXT NOT NULL, confidence REAL, rationale TEXT,
+    attributed INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS signals_post ON signals(post_uid);
 CREATE TABLE IF NOT EXISTS trades (
@@ -51,6 +52,14 @@ class Store:
             path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(path))
         self.db.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a database was first created."""
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(signals)")}
+        if "attributed" not in cols:
+            self.db.execute("ALTER TABLE signals ADD COLUMN attributed INTEGER NOT NULL DEFAULT 0")
+            self.db.commit()
 
     def add_posts(self, posts: Iterable[Post]) -> int:
         """Insert posts, skipping ones already stored. Returns the number added."""
@@ -71,9 +80,10 @@ class Store:
 
     def save_signals(self, post: Post, signals: Iterable[Signal]) -> None:
         self.db.executemany(
-            "INSERT INTO signals VALUES (?,?,?,?,?,?)",
-            [(post.uid, s.ticker, s.sector, s.stance.value, s.confidence, s.rationale)
-             for s in signals])
+            "INSERT INTO signals (post_uid, ticker, sector, stance, confidence, rationale, attributed)"
+            " VALUES (?,?,?,?,?,?,?)",
+            [(post.uid, s.ticker, s.sector, s.stance.value, s.confidence, s.rationale,
+              int(s.attributed)) for s in signals])
         self.db.execute("UPDATE posts SET analyzed = 1 WHERE uid = ?", (post.uid,))
         self.db.commit()
 
@@ -90,17 +100,18 @@ class Store:
     def signals_between(self, start: date, end: date) -> list[Signal]:
         rows = self.db.execute(
             "SELECT p.investor, p.published, p.text, p.source, p.url, p.kind,"
-            " s.ticker, s.stance, s.confidence, s.rationale, s.sector"
+            " s.ticker, s.stance, s.confidence, s.rationale, s.sector, s.attributed"
             " FROM signals s JOIN posts p ON p.uid = s.post_uid"
             " WHERE p.published >= ? AND p.published <= ?",
             (start.isoformat(), end.isoformat())).fetchall()
-        return [Signal(r[6], Stance(r[7]), r[8], r[9], self._post(r[:6]), r[10] or "other")
-                for r in rows]
+        return [Signal(r[6], Stance(r[7]), r[8], r[9], self._post(r[:6]), r[10] or "other",
+                       bool(r[11])) for r in rows]
 
     def signals_for(self, post: Post) -> list[Signal]:
-        rows = self.db.execute("SELECT ticker, stance, confidence, rationale, sector FROM signals"
-                               " WHERE post_uid = ?", (post.uid,)).fetchall()
-        return [Signal(r[0], Stance(r[1]), r[2], r[3], post, r[4] or "other") for r in rows]
+        rows = self.db.execute("SELECT ticker, stance, confidence, rationale, sector, attributed"
+                               " FROM signals WHERE post_uid = ?", (post.uid,)).fetchall()
+        return [Signal(r[0], Stance(r[1]), r[2], r[3], post, r[4] or "other", bool(r[5]))
+                for r in rows]
 
     # ------------------------------------------------------------- trades
     def add_trades(self, trades: Iterable[Trade]) -> int:

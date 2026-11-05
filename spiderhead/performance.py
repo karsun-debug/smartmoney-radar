@@ -78,7 +78,7 @@ def score_calls(signals: Iterable[Signal], prices: PriceBook,
     for s in signals:
         if s.stance is Stance.NEUTRAL or s.ticker.startswith(("SECTOR:", "MACRO:")):
             continue
-        if s.post.kind != "own" or s.confidence < 0.5:
+        if not s.is_own_view or s.confidence < 0.5:
             continue
         key = (s.post.investor_key, s.ticker, s.post.published)
         if key in seen:
