@@ -123,7 +123,8 @@ def safe_url(url: str | None) -> str | None:
 
 
 NAV = [("index.html", "總覽"), ("consensus.html", "大神共同持股"), ("clone.html", "跟單回測"),
-       ("insiders.html", "內部人群買"), ("retail.html", "散戶 vs 大神"), ("weekly.html", "週報")]
+       ("insiders.html", "內部人群買"), ("activist.html", "維權持股"), ("retail.html", "散戶 vs 大神"),
+       ("weekly.html", "週報")]
 
 
 def _nav(root: str, active: str) -> str:
@@ -535,6 +536,31 @@ def reportcard_table(cards, names: dict[str, str], root: str = "") -> str:
             '跟單價值＝照 13F 公布日跟買的報酬超過 SPY 的幅度（±20 個百分點對應 100／0 分）。</p>')
 
 
+def next_13f_deadline(today: date | None = None) -> tuple[date, date]:
+    """(quarter end, filing deadline = 45 days later) for the next 13F deadline on/after today."""
+    today = today or date.today()
+    for year in (today.year - 1, today.year, today.year + 1):
+        for m, d in ((3, 31), (6, 30), (9, 30), (12, 31)):
+            qe = date(year, m, d)
+            if qe + timedelta(days=45) >= today:
+                return qe, qe + timedelta(days=45)
+    raise AssertionError("unreachable")
+
+
+def render_activist(store: Store, names: dict[str, str], days: int = 365) -> str:
+    end = date.today()
+    stakes = [t for t in store.trades_between(end - timedelta(days=days), end, by="filed")
+              if t.side == "stake" or "13D" in t.form or "13G" in t.form]
+    note = ('<p class="sub">持股跨過 5% 時必須申報 Schedule 13D（有意影響公司經營，即「維權」）或 13G（被動持有）。'
+            '13D 通常在 5 個工作日內申報，是比 13F 快得多的訊號。</p>')
+    if not stakes:
+        return _page("維權持股 · Smartmoney Radar", f'<h1>維權持股（13D / 13G）</h1>{note}'
+                     f'<p class="empty">最近一年沒有追蹤名單的 13D/13G 申報。</p>', "", "activist.html")
+    return _page("維權持股 · Smartmoney Radar",
+                 f'<h1>維權持股（13D / 13G）</h1>{note}{trades_table(stakes, names, "", limit=200)}',
+                 "", "activist.html")
+
+
 def render_weekly(store: Store) -> str:
     from .weekly import markdown_to_html
     reps = store.reports()
@@ -637,7 +663,10 @@ def render_index(store: Store, investors: dict[str, Investor], days: int, step: 
              f'<div class="tile"><div class="v">{len({p.investor_key for p, _ in recent.feed})}</div>'
              f'<div class="l">近 {recent_days} 天活躍大神（共 {len(investors)} 位）</div></div>'
              f'<div class="tile"><div class="v">{esc(hottest)}</div><div class="l">近 {recent_days} 天最熱產業</div></div>'
-             f'<div class="tile"><div class="v">{len(recent.consensus)}</div><div class="l">多位大神同時在談的標的</div></div></div>')
+             f'<div class="tile"><div class="v">{len(recent.consensus)}</div><div class="l">多位大神同時在談的標的</div></div>'
+             f'<div class="tile"><div class="v">{(next_13f_deadline()[1] - date.today()).days} 天</div>'
+             f'<div class="l">距離下一次 13F 截止（{next_13f_deadline()[0]:%Y Q}{(next_13f_deadline()[0].month - 1) // 3 + 1}，'
+             f'{next_13f_deadline()[1]}）</div></div></div>')
 
     cards = []
     for s in active:
@@ -816,6 +845,7 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     (out / "insiders.html").write_text(render_insiders(store), encoding="utf-8")
     (out / "retail.html").write_text(render_retail(store, names), encoding="utf-8")
     (out / "weekly.html").write_text(render_weekly(store), encoding="utf-8")
+    (out / "activist.html").write_text(render_activist(store, names), encoding="utf-8")
     (out / "clone.html").write_text(render_clone(clones, names, prices is not None), encoding="utf-8")
     clone_by = {r.investor: r for r in clones}
     for inv in investors.values():

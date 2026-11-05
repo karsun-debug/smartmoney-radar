@@ -35,3 +35,16 @@ def test_exports_feed_and_search_index(tmp_path):
     js = (tmp_path / "assets" / "app.js").read_text(encoding="utf-8")
     assert "window.SH_INDEX=" in js and '"ticker/GOOGL.html"' in js and "investor/ackman.html" in js
     assert 'id="sh-q"' in (tmp_path / "index.html").read_text(encoding="utf-8")
+
+
+def test_13f_deadline_and_activist_page(tmp_path):
+    from spiderhead.dashboard import next_13f_deadline
+    assert next_13f_deadline(date(2026, 11, 5)) == (date(2026, 9, 30), date(2026, 11, 14))
+    assert next_13f_deadline(date(2026, 11, 15)) == (date(2026, 12, 31), date(2027, 2, 14))
+    store = Store(":memory:")
+    store.add_trades([Trade("ackman", TODAY, TODAY, "stake", "SCHEDULE 13D", "HHH", "Howard Hughes",
+                            url="https://sec/1")])
+    build_site(store, load_watchlist(), tmp_path, days=7)
+    html = (tmp_path / "activist.html").read_text(encoding="utf-8")
+    assert "HHH" in html and "Bill Ackman" in html
+    assert "距離下一次 13F 截止" in (tmp_path / "index.html").read_text(encoding="utf-8")
