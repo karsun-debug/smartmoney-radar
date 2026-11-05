@@ -85,6 +85,8 @@ footer{margin-top:48px;color:var(--muted);font-size:12px}
 nav.top{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:14px;margin:0 0 18px;padding-bottom:10px;border-bottom:1px solid var(--grid)}
 nav.top a{text-decoration:none;color:var(--ink-2)}nav.top a.on{color:var(--ink);font-weight:600}
 nav.top .brand{color:var(--ink);font-weight:700;margin-right:8px}
+nav.top input{margin-left:auto;min-width:160px;max-width:240px;flex:1;padding:4px 8px;border-radius:6px;
+border:1px solid var(--border);background:var(--surface);color:var(--ink);font:inherit;font-size:13px}
 """
 
 JS = """
@@ -126,7 +128,25 @@ NAV = [("index.html", "總覽"), ("consensus.html", "大神共同持股"), ("clo
 def _nav(root: str, active: str) -> str:
     links = "".join(f'<a href="{root}{href}"{" class=on" if href == active else ""}>{esc(label)}</a>'
                     for href, label in NAV)
-    return f'<nav class="top"><a class="brand" href="{root}index.html">Smartmoney Radar</a>{links}</nav>'
+    search = (f'<input id="sh-q" type="search" list="sh-list" placeholder="搜尋股票或大神…" '
+              f'aria-label="搜尋" data-root="{root}"><datalist id="sh-list"></datalist>')
+    return (f'<nav class="top"><a class="brand" href="{root}index.html">Smartmoney Radar</a>{links}'
+            f'<a href="{root}data/index.json">資料</a>{search}</nav>')
+
+
+SEARCH_JS = """
+(function(){
+const q=document.getElementById('sh-q'),list=document.getElementById('sh-list');
+if(!q||!window.SH_INDEX)return;
+const root=q.dataset.root||'';
+window.SH_INDEX.forEach(([label])=>{const o=document.createElement('option');o.value=label;list.appendChild(o);});
+function go(){const v=q.value.trim().toUpperCase();if(!v)return;
+ const hit=window.SH_INDEX.find(([l])=>l.toUpperCase()===v)||window.SH_INDEX.find(([l])=>l.toUpperCase().startsWith(v))
+  ||window.SH_INDEX.find(([l])=>l.toUpperCase().includes(v));
+ if(hit)location.href=root+hit[1];}
+q.addEventListener('change',go);q.addEventListener('keydown',e=>{if(e.key==='Enter')go();});
+})();
+"""
 
 
 def _page(title: str, body: str, root: str, active: str = "") -> str:
@@ -713,7 +733,7 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     (out / "investor").mkdir(exist_ok=True)
     step = step or (1 if days <= 31 else 7)
     (out / "assets" / "style.css").write_text(CSS, encoding="utf-8")
-    (out / "assets" / "app.js").write_text(JS, encoding="utf-8")
+    # app.js written at the end, once the search index (all pages) is known.
     (out / "ticker").mkdir(exist_ok=True)
     from .digest import display_names
     names = display_names(investors)
@@ -745,4 +765,11 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     for t in sorted(tickers):
         (out / "ticker" / f"{_slug(t)}.html").write_text(
             render_ticker(store, t, names, days, prices, consensus), encoding="utf-8")
+    from .export import write_exports
+    write_exports(store, investors, out, days, consensus=consensus,
+                  clusters=find_clusters(store.insider_buys_between(end - timedelta(days=13), end)))
+    index = [[f"{t}", f"ticker/{_slug(t)}.html"] for t in sorted(tickers)]
+    index += [[f"{inv.name}（{inv.fund}）", f"investor/{inv.key}.html"] for inv in investors.values()]
+    (out / "assets" / "app.js").write_text(
+        JS + "\nwindow.SH_INDEX=" + json.dumps(index, ensure_ascii=False) + ";\n" + SEARCH_JS, encoding="utf-8")
     return out / "index.html"
