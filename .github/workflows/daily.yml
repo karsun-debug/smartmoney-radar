@@ -50,7 +50,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[llm]"
+      - name: Install (Chinese fonts for the daily chart card)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+          pip install -e ".[llm,charts]"
 
       # Keep the post history between runs.
       - name: Restore database

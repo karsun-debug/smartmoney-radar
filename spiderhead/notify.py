@@ -135,6 +135,17 @@ class LineNotifier:
         self.to = to if to is not None else os.environ.get("LINE_TO")
         self.post = http_post
 
+    def send_image(self, url: str, preview_url: str | None = None) -> None:
+        """Image message. LINE needs public HTTPS URLs (e.g. the GitHub Pages copy of the card)."""
+        body: dict = {"messages": [{"type": "image", "originalContentUrl": url,
+                                    "previewImageUrl": preview_url or url}]}
+        target = BROADCAST_URL
+        if self.to:
+            body["to"] = self.to
+            target = PUSH_URL
+        headers = {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
+        self.post(target, headers, json.dumps(body).encode("utf-8"))
+
     def send(self, text: str) -> int:
         """Send ``text`` (split as needed). Returns the number of API requests made."""
         chunks = split_text(text)

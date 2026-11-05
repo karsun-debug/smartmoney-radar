@@ -120,6 +120,8 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--days", type=int, default=1, help="摘要涵蓋最近 N 天（預設 1）")
     pl.add_argument("--dashboard-url", help="附在訊息最後的儀表板網址")
     pl.add_argument("--dry-run", action="store_true", help="只印出訊息，不送出")
+    pl.add_argument("--site", default="site", help="儀表板資料夾（找今天的圖卡 img/daily-YYYYMMDD.png）")
+    pl.add_argument("--no-card", action="store_true", help="不送圖卡，只送文字")
 
     db = sub.add_parser("dashboard", help="產生網頁儀表板（靜態 HTML）")
     db.add_argument("--out", default="site", help="輸出資料夾")
@@ -367,11 +369,28 @@ def _store_commands(args, investors) -> int:
         from .digest import build_digest
         from .notify import format_line
         url = args.dashboard_url or os.environ.get("SPIDERHEAD_DASHBOARD_URL")
-        text = format_line(build_digest(store, investors, args.days), url)
+        digest = build_digest(store, investors, args.days)
+        text = format_line(digest, url)
+        img = None
+        if not args.no_card:
+            from .card import card_paths, render_card, write_preview
+            full, preview = card_paths(args.site)
+            if not full.exists():
+                render_card(digest, store, full)
+            if full.exists():
+                from .channels import Image
+                if not preview.exists():
+                    write_preview(full, preview)
+                base = (url or "").rstrip("/") + "/" if url else None
+                img = Image(str(full), f"{base}img/{full.name}" if base else None,
+                            f"{base}img/{preview.name}" if base and preview.exists() else None,
+                            f"Smartmoney Radar 每日快報 {digest.end}")
         if args.dry_run:
             print(text)
+            if img:
+                print(f"\n[圖卡] {img.path}" + (f"（{img.url}）" if img.url else ""))
             return 0
-        return _broadcast(text)
+        return _broadcast(text, img)
 
     if args.cmd == "alert":
         from .alerts import run_alerts
@@ -408,6 +427,14 @@ def _store_commands(args, investors) -> int:
             from .sources import _requests_get
             prices = PriceBook(store, _requests_get)
         index = build_site(store, investors, args.out, days=args.days, prices=prices)
+        from .card import card_paths, render_card, write_preview
+        from .digest import build_digest
+        full, preview = card_paths(args.out)
+        if render_card(build_digest(store, investors, 1), store, full):
+            write_preview(full, preview)
+            print(f"每日圖卡：{full}")
+        else:
+            print("（沒有安裝 matplotlib，略過每日圖卡：pip install -e \".[charts]\"）", file=sys.stderr)
         for err in (prices.errors if prices else [])[:3]:
             print(f"warning: {err}", file=sys.stderr)
         if prices is not None:
@@ -522,12 +549,14 @@ def _report(results) -> None:
               file=sys.stderr if err else sys.stdout)
 
 
-def _broadcast(text: str) -> int:
+def _broadcast(text: str, img=None) -> int:
     from .channels import Broadcast, configured_channels
     chans = configured_channels()
     if not chans:
         print("沒有設定任何通知管道（LINE / Telegram / Discord / Slack / Email），略過", file=sys.stderr)
         return 0
+    if img is not None:
+        _report(Broadcast(chans).send_image(img))          # best effort; text still goes out
     try:
         _report(Broadcast(chans).send(text))
     except RuntimeError as exc:

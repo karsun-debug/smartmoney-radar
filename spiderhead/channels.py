@@ -20,6 +20,22 @@ from email.message import EmailMessage
 from .notify import LineNotifier, split_text
 
 HttpPost = Callable[[str, dict[str, str], bytes], None]
+Upload = Callable[[str, dict, dict], None]          # (url, form fields, {name: (filename, bytes, mime)})
+
+
+def _upload(url: str, data: dict, files: dict) -> None:
+    import requests
+    resp = requests.post(url, data=data, files=files, timeout=60)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+
+
+@dataclass(frozen=True)
+class Image:
+    path: str                       # local PNG
+    url: str | None = None          # public HTTPS copy (needed by LINE / Slack)
+    preview_url: str | None = None
+    caption: str = ""
 
 
 def _post(url: str, headers: dict[str, str], body: bytes) -> None:
@@ -32,10 +48,17 @@ def _post(url: str, headers: dict[str, str], body: bytes) -> None:
 class Telegram:
     name = "Telegram"
 
-    def __init__(self, token: str, chat_id: str, post: HttpPost = _post):
+    def __init__(self, token: str, chat_id: str, post: HttpPost = _post, upload: Upload = _upload):
         self.url = f"https://api.telegram.org/bot{token}/sendMessage"
+        self.photo_url = f"https://api.telegram.org/bot{token}/sendPhoto"
         self.chat_id = chat_id
         self.post = post
+        self.upload = upload
+
+    def send_image(self, img: "Image") -> None:
+        with open(img.path, "rb") as fh:
+            self.upload(self.photo_url, {"chat_id": self.chat_id, "caption": img.caption[:1000]},
+                        {"photo": (os.path.basename(img.path), fh.read(), "image/png")})
 
     def send(self, text: str) -> None:
         for chunk in split_text(text, 4000):
@@ -46,9 +69,16 @@ class Telegram:
 class Discord:
     name = "Discord"
 
-    def __init__(self, webhook: str, post: HttpPost = _post):
+    def __init__(self, webhook: str, post: HttpPost = _post, upload: Upload = _upload):
         self.webhook = webhook
         self.post = post
+        self.upload = upload
+
+    def send_image(self, img: "Image") -> None:
+        with open(img.path, "rb") as fh:
+            payload = json.dumps({"content": img.caption[:1900], "allowed_mentions": {"parse": []}})
+            self.upload(self.webhook, {"payload_json": payload},
+                        {"file": (os.path.basename(img.path), fh.read(), "image/png")})
 
     def send(self, text: str) -> None:
         for chunk in split_text(text, 1900):
@@ -68,6 +98,13 @@ class Slack:
             self.post(self.webhook, {"Content-Type": "application/json"},
                       json.dumps({"text": chunk}).encode())
 
+    def send_image(self, img: "Image") -> None:
+        if not img.url:
+            raise RuntimeError("Slack webhooks need a public image URL")
+        blocks = [{"type": "image", "image_url": img.url, "alt_text": img.caption or "daily card"}]
+        self.post(self.webhook, {"Content-Type": "application/json"},
+                  json.dumps({"text": img.caption or "daily card", "blocks": blocks}).encode())
+
 
 class Email:
     name = "Email"
@@ -78,13 +115,23 @@ class Email:
         self.to, self.sender = to, sender or user
         self.smtp_factory = smtp_factory
 
+    def send_image(self, img: "Image") -> None:
+        self._send(img.caption or "Smartmoney Radar", img)
+
     def send(self, text: str) -> None:
+        self._send(text, None)
+
+    def _send(self, text: str, img: "Image | None") -> None:
         msg = EmailMessage()
         first = text.strip().splitlines()[0] if text.strip() else "Smartmoney Radar"
         msg["Subject"] = first[:120]
         msg["From"] = self.sender
         msg["To"] = self.to
         msg.set_content(text)
+        if img is not None:
+            with open(img.path, "rb") as fh:
+                msg.add_attachment(fh.read(), maintype="image", subtype="png",
+                                   filename=os.path.basename(img.path))
         if self.smtp_factory:
             smtp = self.smtp_factory(self.host, self.port)
         elif self.port == 465:
@@ -105,6 +152,11 @@ class Line:
 
     def send(self, text: str) -> None:
         self.notifier.send(text)
+
+    def send_image(self, img: "Image") -> None:
+        if not img.url:
+            raise RuntimeError("LINE needs a public HTTPS image URL (set --dashboard-url)")
+        self.notifier.send_image(img.url, img.preview_url)
 
 
 def configured_channels(env: dict[str, str] | None = None) -> list:
@@ -140,4 +192,18 @@ class Broadcast:
                 results.append((ch.name, f"{type(exc).__name__}: {str(exc)[:200]}"))
         if results and all(err for _, err in results):
             raise RuntimeError("all notification channels failed: " + "; ".join(f"{n}: {e}" for n, e in results))
+        return results
+
+    def send_image(self, img: Image) -> list[tuple[str, str | None]]:
+        """Best effort: channels without image support (or a public URL) are reported, never fatal."""
+        results = []
+        for ch in self.channels:
+            fn = getattr(ch, "send_image", None)
+            if fn is None:
+                continue
+            try:
+                fn(img)
+                results.append((ch.name, None))
+            except Exception as exc:
+                results.append((ch.name, f"{type(exc).__name__}: {str(exc)[:200]}"))
         return results

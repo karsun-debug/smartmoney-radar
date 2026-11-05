@@ -12,6 +12,27 @@
 
 ---
 
+## 完全免費
+
+這套系統**不需要花任何錢**：
+
+| 項目 | 費用 |
+|---|---|
+| 資料來源（SEC、眾議院、FRED、FINRA、維基百科、Reddit、Google News、Stooq 股價） | 全部免費公開資料 |
+| GitHub Actions（每天自動執行）＋ GitHub Pages（網站） | 公開 repo 免費 |
+| 推播到手機：**Telegram**（無則數上限）或 **LINE**（免費方案每月約 200 則） | 免費 |
+| Claude（`ANTHROPIC_API_KEY`）、X API（`X_BEARER_TOKEN`） | **選填**，不設也能完整運作；只是分析改用關鍵字規則 |
+
+## 手機收通知：兩種免費選擇
+
+- **Telegram（最推薦，零限制）**：手機裝 Telegram → 找 `@BotFather` 輸入 `/newbot` 建立機器人，拿到 token → 傳一則訊息給你的機器人 →
+  用瀏覽器開 `https://api.telegram.org/bot<token>/getUpdates`，找到 `"chat":{"id":數字}` → 把 token 與 id 設成
+  `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`。
+- **LINE**：見下方步驟 2。
+
+每天早上手機會先收到一張**圖卡**（總經走勢、產業熱度、大神實際交易、投行評等、內部人群買），再收到文字摘要；
+有新喊單、新申報或群買時，另外即時通知。
+
 ## 步驟 0：把程式合併到 main
 
 GitHub Actions 的排程（`schedule`）**只會在預設分支（main）上執行**。
