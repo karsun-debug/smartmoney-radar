@@ -75,6 +75,8 @@ color:var(--ink);text-decoration:none;font-weight:600;min-height:44px}
  .tabbar svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
  h1{font-size:22px}
  .tiles{grid-template-columns:1fr 1fr}
+ table td.wrap,table th.wrap{min-width:0;overflow-wrap:anywhere}
+ table th,table td{padding:8px 7px}
  .tile .v{font-size:21px}
 }
 a{color:var(--series)}
@@ -860,7 +862,7 @@ def render_macro(store: Store, names: dict[str, str]) -> str:
     have = [m for m in views if len(m.points) > 1]
     lvl = {"ok": ("bull", "✓", "正常"), "warn": ("neutral", "!", "留意"), "alert": ("bear", "✕", "警訊")}
     sig_rows = "".join(
-        f'<tr><td>{esc(s.name)}</td><td><span class="badge {lvl[s.level][0]}"><span class="i">{lvl[s.level][1]}'
+        f'<tr><td class="wrap">{esc(s.name)}</td><td><span class="badge {lvl[s.level][0]}"><span class="i">{lvl[s.level][1]}'
         f'</span>{lvl[s.level][2]}</span></td><td class="wrap">{esc(s.text)}</td></tr>' for s in signals(views))
     sig_html = (f'<div class="tablewrap"><table><tr><th>指標</th><th>狀態</th><th class="wrap">說明</th></tr>'
                 f'{sig_rows}</table></div>') if sig_rows else ""
