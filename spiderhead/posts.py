@@ -235,3 +235,45 @@ def _norm_ticker(raw: str) -> str:
     if sep and prefix.upper() == "SECTOR":
         return f"SECTOR:{rest.lower()}"
     return raw.upper()
+
+
+class HybridAnalyzer:
+    """Keyword pass first; Claude only where it can add something.
+
+    A post goes to Claude when it is the investor's own words, when the
+    keyword pass found a ticker or sector, or when it quotes the investor.
+    Industry news always uses keywords (only the sector matters there).
+    ``max_llm_calls`` caps spend per run; posts over the cap are deferred to
+    the next run (``analyze`` returns ``None`` for them).
+    """
+
+    def __init__(self, keyword: KeywordAnalyzer, llm, max_llm_calls: int = 200):
+        self.keyword = keyword
+        self.llm = llm
+        self.max_llm_calls = max_llm_calls
+        self.llm_calls = 0
+        self.deferred = 0
+        self.failures = 0
+
+    def needs_llm(self, post: Post, quick: list[Signal]) -> bool:
+        if post.kind == "industry":
+            return False
+        if post.kind == "own":
+            return True
+        return bool(quick) or self.keyword.attributed(post)
+
+    def analyze(self, post: Post) -> list[Signal] | None:
+        quick = self.keyword.analyze(post)
+        if not self.needs_llm(post, quick):
+            return quick
+        if self.llm_calls >= self.max_llm_calls:
+            self.deferred += 1
+            return None
+        self.llm_calls += 1
+        try:
+            return self.llm.analyze(post)
+        except Exception:
+            self.failures += 1
+            if self.failures >= 5:          # API down / no credit: stop spending time on it
+                self.max_llm_calls = self.llm_calls
+            return quick

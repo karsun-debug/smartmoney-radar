@@ -127,6 +127,9 @@ spiderhead push-line --days 7
 到 [Claude Console](https://console.anthropic.com/) 建立 API key，設成 `ANTHROPIC_API_KEY`。
 排程會自動加上 `--llm`，改用 Claude 判斷看多/看空、產業、反串與引述，比關鍵字準確很多。
 
+**費用控制**：只有「本人發言」、關鍵字已找到個股/產業、或引述大神的報導才會送給 Claude；產業新聞一律用關鍵字。
+每次執行最多送 200 則（`--llm-budget` 可調），超過的留到下一次。第一次執行資料最多，之後每次通常只有幾十則。
+
 ## 常見問題
 
 | 狀況 | 原因與處理 |

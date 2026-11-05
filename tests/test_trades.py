@@ -186,3 +186,24 @@ def test_store_migrates_old_signals_table(tmp_path):
     store = Store(db)
     cols = {r[1] for r in store.db.execute("PRAGMA table_info(signals)")}
     assert "attributed" in cols
+
+
+def test_hybrid_analyzer_routes_and_budget():
+    from spiderhead.posts import HybridAnalyzer
+
+    class FakeLLM:
+        calls = 0
+
+        def analyze(self, post):
+            FakeLLM.calls += 1
+            return []
+    h = HybridAnalyzer(KeywordAnalyzer(), FakeLLM(), max_llm_calls=2)
+    industry = Post("industry:energy", TODAY, "Oil prices rise on $XOM news", "news", None, "industry")
+    noise = Post("ackman", TODAY, "Pershing Square office moves to new building", "news", None, "news")
+    own1 = Post("ackman", TODAY, "Thinking about markets today.", "x")
+    own2 = Post("ackman", TODAY, "Another thought.", "x")
+    own3 = Post("ackman", TODAY, "Third thought.", "x")
+    assert h.analyze(industry) and h.analyze(noise) == []          # keyword only
+    assert h.analyze(own1) == [] and h.analyze(own2) == []           # 2 LLM calls
+    assert h.analyze(own3) is None and h.deferred == 1               # over budget: deferred
+    assert FakeLLM.calls == 2

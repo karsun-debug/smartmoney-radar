@@ -15,10 +15,25 @@ from .watchlist import load_watchlist
 
 
 def _analyze_pending(store, analyzer) -> int:
-    pending = store.unanalyzed()
-    for post in pending:
-        store.save_signals(post, analyzer.analyze(post))
-    return len(pending)
+    done = 0
+    for post in store.unanalyzed():
+        signals = analyzer.analyze(post)
+        if signals is None:            # deferred (LLM budget used up this run)
+            continue
+        store.save_signals(post, signals)
+        done += 1
+    if hasattr(analyzer, "llm_calls"):
+        extra = f"，延後 {analyzer.deferred} 則到下次" if analyzer.deferred else ""
+        print(f"Claude 分析 {analyzer.llm_calls} 則{extra}")
+    return done
+
+
+def _make_analyzer(args, investors):
+    keyword = KeywordAnalyzer(names=_name_map(investors))
+    if not getattr(args, "llm", False):
+        return keyword
+    from .posts import HybridAnalyzer
+    return HybridAnalyzer(keyword, ClaudeAnalyzer(), getattr(args, "llm_budget", 200))
 
 
 def _digest_markdown(store, investors, days: int, investor: str | None = None) -> str:
@@ -92,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--no-news", action="store_true", help="skip Google News per investor")
     f.add_argument("--no-industry", action="store_true", help="skip industry news")
     f.add_argument("--llm", action="store_true", help="analyze with Claude")
+    f.add_argument("--llm-budget", type=int, default=200,
+                   help="每次最多送幾則給 Claude（其餘延到下次，控制費用）")
     f.add_argument("--no-trades", action="store_true",
                    help="skip Form 4 / 13D / congress trade collection")
 
@@ -161,11 +178,11 @@ def main(argv: list[str] | None = None) -> int:
 
     analyzer = None
     if args.cmd in ("posts", "report"):
-        analyzer = ClaudeAnalyzer() if args.llm else KeywordAnalyzer(names=_name_map(investors))
+        analyzer = _make_analyzer(args, investors)
 
     if args.cmd == "posts":
         for post in load_posts_json(args.posts_file):
-            for s in analyzer.analyze(post):
+            for s in analyzer.analyze(post) or []:
                 print(f"{post.published} {post.investor_key:12} {s.ticker:8} "
                       f"{s.stance.value:8} {s.confidence:.2f}  {s.rationale}")
         return 0
@@ -191,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     posts = [p for p in load_posts_json(args.posts_file) if p.investor_key == inv.key]
     if quarter != "(offline)":
         posts = [p for p in posts if str(quarter_end(p.published)) == quarter]
-    signals = [s for p in posts for s in analyzer.analyze(p)]
+    signals = [s for p in posts for s in analyzer.analyze(p) or []]
     print(holdings_markdown(inv, quarter, changes, top=10))
     print()
     print(consistency_markdown(check(signals, changes)))
@@ -202,7 +219,7 @@ def _store_commands(args, investors) -> int:
     from .store import Store
     store = Store()
     if args.cmd in ("fetch", "import"):
-        analyzer = ClaudeAnalyzer() if args.llm else KeywordAnalyzer(names=_name_map(investors))
+        analyzer = _make_analyzer(args, investors)
         if args.cmd == "fetch":
             from .sources import Collector, load_sources
             collector = Collector(load_sources(investors, args.sources))
