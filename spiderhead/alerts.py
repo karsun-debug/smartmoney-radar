@@ -56,7 +56,8 @@ def format_alert(pending: Pending, investors: dict[str, Investor], limit: int = 
     names = display_names(investors)
     lines = ["🔔 SpiderHead 即時通知"]
     for t in pending.trades[:limit]:
-        size = t.amount_text or (f"{t.shares:,.0f} 股" if t.shares else "")
+        size = " · ".join(x for x in (f"{t.shares:,.0f} 股" if t.shares and "股" not in t.amount_text else "",
+                                      t.amount_text) if x)
         if t.value_usd and "股" in size:
             size += f"（約 ${t.value_usd / 1e6:,.1f}M）"
         lines += ["", f"🧾 {names.get(t.investor_key, t.investor_key)} {SIDE.get(t.side, t.side)} "

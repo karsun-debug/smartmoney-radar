@@ -220,7 +220,8 @@ def trades_table(trades: list[Trade], names: dict[str, str], root: str, show_who
     rows = []
     for t in trades[:limit]:
         icon, label, cls = SIDE.get(t.side, ("●", t.side, "neutral"))
-        size = t.amount_text or (f"{t.shares:,.0f} 股" if t.shares else "")
+        size = " · ".join(x for x in (f"{t.shares:,.0f} 股" if t.shares and "股" not in t.amount_text else "",
+                                      t.amount_text) if x)
         if t.value_usd:
             size += f" · ${t.value_usd / 1e6:,.1f}M"
         form = FORM_LABEL.get(t.form, t.form)

@@ -54,7 +54,8 @@ def format_line(d: Digest, dashboard_url: str | None = None, max_posts: int = 8)
         side = {"buy": "🟢買進", "sell": "🔴賣出", "stake": "🔷持股逾5%", "exchange": "⚪交換"}
         out += ["", "🧾 最新對帳單（實際申報交易）"]
         for t in d.trades[:8]:
-            size = t.amount_text or (f"{t.shares:,.0f}股" if t.shares else "")
+            size = " ".join(x for x in (f"{t.shares:,.0f}股" if t.shares and "股" not in t.amount_text else "",
+                                        t.amount_text) if x)
             out.append(f"• {d.names.get(t.investor_key, t.investor_key)} {side.get(t.side, t.side)} "
                        f"{t.ticker or t.issuer[:30]} {size}（{t.traded:%m/%d}）"
                        + (f"\n  {t.url}" if t.url else ""))
