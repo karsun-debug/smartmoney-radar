@@ -4,7 +4,8 @@ import pytest
 
 from spiderhead.banks import NameResolver, parse_headline
 
-R = NameResolver({"SNOWFLAKE INC.": "SNOW", "ADVANCED MICRO DEVICES INC": "AMD", "INTEL CORP": "INTC"})
+R = NameResolver({"SNOWFLAKE INC.": "SNOW", "ADVANCED MICRO DEVICES INC": "AMD", "INTEL CORP": "INTC",
+                  "BEST BUY CO INC": "BBY"})
 D = date(2026, 11, 3)
 
 CASES = [
@@ -24,6 +25,10 @@ CASES = [
      ("barclays", "PLTR", "initiate", "neutral", "Equal Weight", 90.0, None)),
     ("Wells Fargo lifts NASDAQ:MSFT target to $600",
      ("wellsfargo", "MSFT", "raise_pt", "bullish", None, 600.0, None)),
+    ("Goldman Sachs upgrades Target to Buy, PT $150",
+     ("goldman", "TGT", "upgrade", "bullish", "Buy", 150.0, None)),
+    ("Morgan Stanley upgrades Best Buy to Overweight",
+     ("morganstanley", "BBY", "upgrade", "bullish", "Overweight", None, None)),
 ]
 
 

@@ -82,6 +82,14 @@ EDGAR 規範：User-Agent 必須帶聯絡資訊、每秒 ≤ 10 次請求。
 | `weekly.py` | 每週週報（Claude 撰寫，或範本） |
 | `export.py` | 開放資料：JSON / CSV / RSS |
 | `mcp_server.py` | MCP 伺服器，讓 AI 助理唯讀查詢資料庫 |
+| `macro.py` | FRED 總經數據、年增率轉換、總經訊號 |
+| `financials.py` | SEC XBRL 財報 → 每季財務數字、年增率；財報分析報導 |
+| `banks.py` | 投行評等解析（新聞標題）、準確度與目標價驗證、研究 vs 自家 13F |
+| `buzz.py` | 維基百科瀏覽量聲量 |
+| `shorts.py` | FINRA 每日放空成交量 |
+| `analytics.py` | 漲跌榜、CEO/CFO 大額買進、群買後表現、低於 13F 價位 |
+| `card.py` | 每日圖卡（matplotlib） |
+| `pwa.py` | iPhone 可安裝網頁 App：manifest、service worker、圖示 |
 | `report.py` | Markdown 報告 |
 | `cli.py` | `spiderhead fetch / alert / push-line / dashboard / digest / feed / trends / doctor / verify-ciks / holdings / report …` |
 

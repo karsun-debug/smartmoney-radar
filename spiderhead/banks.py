@@ -186,7 +186,7 @@ def parse_headline(title: str, resolver: NameResolver, published: date, url: str
     else:
         sm = _SUBJECT.search(rest)
         if sm:
-            subj = re.sub(r"\b(?:price\s+target|pt|target)\b.*$", "", sm.group(1), flags=re.I).strip(" ,.'")
+            subj = re.sub(r"\b(?:price\s+target|pt)\b.*$", "", sm.group(1), flags=re.I).strip(" ,.'")
             ticker = resolver(subj)
     if not ticker:
         return None
