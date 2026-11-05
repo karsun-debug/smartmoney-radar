@@ -2,7 +2,7 @@
 
 > 指令名稱仍是 `spiderhead`，環境變數仍以 `SPIDERHEAD_` 開頭（沿用舊名，已設定的 Secrets 不用改）。
 
-自動追蹤美國投資大神（Buffett、Ackman、Burry、Dalio、Cathie Wood、Howard Marks…）**最近說了什麼**、**哪些產業正在被熱議**，並可對照 **SEC 申報的實際持倉**，檢查「說的」跟「做的」是否一致。
+自動追蹤美國投資大神（Buffett、Ackman、Burry、Cathie Wood、Dalio、Pelosi…）**最近說了什麼**、**哪些產業正在被熱議**，並可對照 **SEC 申報的實際持倉**，檢查「說的」跟「做的」是否一致。
 
 主要功能：
 - **自動抓取**：每位大神的 X 貼文（需 X API）、部落格/Substack/YouTube RSS、Google News 報導，以及各產業新聞。
