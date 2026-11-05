@@ -1,6 +1,6 @@
 [project]
 name = "spiderhead"
-version = "0.5.0"
+version = "0.6.0"
 description = "Track famous US investors' public posts against their SEC filings"
 requires-python = ">=3.10"
 dependencies = ["requests>=2.31", "pypdf>=4"]

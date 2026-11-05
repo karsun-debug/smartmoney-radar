@@ -73,6 +73,15 @@ EDGAR 規範：User-Agent 必須帶聯絡資訊、每秒 ≤ 10 次請求。
 | `notify.py` / `alerts.py` | LINE Messaging API 推播：每日摘要、即時通知（每則只送一次，首次執行只記錄） |
 | `dashboard.py` | 靜態網頁儀表板（總覽、每位大神、每檔個股；內嵌 SVG 圖表、深色模式） |
 | `health.py` / `doctor.py` | 資料來源成功/失敗紀錄與 `spiderhead doctor` 設定檢查 |
+| `consensus13f.py` | 大神共同持股（類 Dataroma）：最多人持有、本季最多人買／賣 |
+| `clone.py` | 13F 跟單回測：公布日買進前 10 大持股、持有到下一季公布，與 SPY 比較 |
+| `insiders.py` | 全市場 Form 4（SEC 每日索引）→ 公開市場買進 → 14 天內 3 位以上內部人的群買 |
+| `retail.py` | Reddit 散戶熱度與情緒，對照大神看法（散戶資料不混入大神趨勢） |
+| `reportcard.py` | 大神評分卡：說到做到、喊單準確、跟單價值 |
+| `channels.py` | 通知管道：LINE、Telegram、Discord、Slack、Email |
+| `weekly.py` | 每週週報（Claude 撰寫，或範本） |
+| `export.py` | 開放資料：JSON / CSV / RSS |
+| `mcp_server.py` | MCP 伺服器，讓 AI 助理唯讀查詢資料庫 |
 | `report.py` | Markdown 報告 |
 | `cli.py` | `spiderhead fetch / alert / push-line / dashboard / digest / feed / trends / doctor / verify-ciks / holdings / report …` |
 

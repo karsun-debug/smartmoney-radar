@@ -68,6 +68,7 @@ def run_checks(get: Getter, env: dict[str, str] | None = None) -> list[Check]:
         return f"{y} 年 {len(ptr)} 份交易申報，最新 {newest}"
     checks.append(_try("眾議院申報 (House Clerk)", house, WARN))
     checks.append(_congress_freshness(get))
+    checks.append(_try("散戶論壇 (Reddit)", lambda: f"r/wallstreetbets {len(get('https://www.reddit.com/r/wallstreetbets/new/.rss?limit=5', {}))} bytes", WARN))
     from .ark import ARK_FUNDS
     checks.append(_try("ARK 每日持股", lambda: f"ARKK {len(get(ARK_FUNDS['ARKK'], {}))} bytes", WARN))
     checks.append(_try("股價 (Stooq)", lambda: (lambda b: "正常" if b.startswith(b"Date") else
