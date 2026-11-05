@@ -1,0 +1,51 @@
+# Every 2 hours: collect new posts / filings -> send instant LINE alerts for new calls and trades.
+# Uses the same secrets and database cache as daily.yml.
+# Cost note: ~2 min per run x 12 runs/day ≈ 720 min/month (free for public repos;
+# private repos get 2,000 free minutes/month on the Free plan).
+name: instant-alerts
+
+on:
+  schedule:
+    - cron: "41 */2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spiderhead-db
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    env:
+      SPIDERHEAD_USER_AGENT: ${{ secrets.SPIDERHEAD_USER_AGENT }}
+      SPIDERHEAD_DB: data/spiderhead.db
+      LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+      LINE_TO: ${{ secrets.LINE_TO }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[llm]"
+      - name: Restore database
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: spiderhead-db-${{ github.run_id }}
+          restore-keys: spiderhead-db-
+      - name: Collect
+        run: spiderhead fetch --days 2 --sources sources.example.json ${{ env.ANTHROPIC_API_KEY != '' && '--llm' || '' }}
+      - name: Send alerts
+        if: env.LINE_CHANNEL_ACCESS_TOKEN != ''
+        run: spiderhead alert
+      - name: Save database
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: spiderhead-db-${{ github.run_id }}

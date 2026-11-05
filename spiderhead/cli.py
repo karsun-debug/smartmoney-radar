@@ -67,6 +67,13 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("list", help="列出追蹤名單")
     sub.add_parser("verify-ciks", help="向 SEC 確認每位大神的 CIK 對應到正確基金")
+    sub.add_parser("doctor", help="檢查設定與每個資料來源是否連得上")
+
+    al = sub.add_parser("alert", help="即時通知：新的喊單或申報交易立刻推 LINE")
+    al.add_argument("--dry-run", action="store_true", help="只印出訊息，不送出也不記錄")
+    al.add_argument("--backfill", action="store_true", help="第一次執行也送出（預設第一次只記錄不送）")
+    al.add_argument("--include-news", action="store_true", help="新聞報導中的喊單也通知")
+    al.add_argument("--lookback", type=int, default=3, help="只看最近 N 天的資料")
 
     pl = sub.add_parser("push-line", help="把摘要推播到 LINE")
     pl.add_argument("--days", type=int, default=1, help="摘要涵蓋最近 N 天（預設 1）")
@@ -130,6 +137,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{inv.key:15} {inv.name:24} {inv.fund:38} CIK {inv.cik or '-'}")
         return 0
 
+    if args.cmd == "doctor":
+        from .doctor import format_checks, run_checks
+        from .sources import _requests_get
+        print(format_checks(run_checks(_requests_get)))
+        return 0
+
     if args.cmd == "verify-ciks":
         from .edgar import EdgarClient
         client = EdgarClient()
@@ -143,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{inv.key:14} CIK {inv.cik}  expected: {inv.fund:40} SEC: {name}")
         return 0
 
-    if args.cmd in ("fetch", "import", "feed", "trends", "digest", "push-line", "dashboard"):
+    if args.cmd in ("fetch", "import", "feed", "trends", "digest", "push-line", "dashboard", "alert"):
         return _store_commands(args, investors)
 
     analyzer = None
@@ -203,7 +216,7 @@ def _store_commands(args, investors) -> int:
         analyzed = _analyze_pending(store, analyzer)
         print(f"抓到 {len(posts)} 則，新增 {added} 則，分析 {analyzed} 則")
         if args.cmd == "fetch" and not args.no_trades:
-            trades = _collect_trades(investors, max(args.days, 30))
+            trades = _collect_trades(investors, max(args.days, 30), store)
             print(f"對帳單：抓到 {len(trades)} 筆，新增 {store.add_trades(trades)} 筆")
         return 0
 
@@ -218,6 +231,22 @@ def _store_commands(args, investors) -> int:
             return 0
         n = LineNotifier().send(text)
         print(f"已送出 LINE（{n} 次請求）")
+        return 0
+
+    if args.cmd == "alert":
+        from .alerts import run_alerts
+        send = None
+        if not args.dry_run:
+            from .notify import LineNotifier
+            send = LineNotifier().send
+        n, text = run_alerts(store, investors, send, dry_run=args.dry_run, backfill=args.backfill,
+                             lookback_days=args.lookback, include_news=args.include_news)
+        if text:
+            print(text)
+        if n == 0 and not text:
+            print("沒有新的通知（第一次執行只會記錄現有資料，不會送出）")
+        else:
+            print(f"\n{'（試跑，未送出）' if args.dry_run else '已送出'} {n} 則")
         return 0
 
     if args.cmd == "dashboard":
@@ -269,7 +298,7 @@ def _holdings_for_dashboard(store, investors):
     return out
 
 
-def _collect_trades(investors, days: int):
+def _collect_trades(investors, days: int, store=None):
     import os
     from .holdings import TickerResolver
     from .sources import _requests_get
@@ -286,6 +315,18 @@ def _collect_trades(investors, days: int):
         print("warning: SPIDERHEAD_USER_AGENT not set; skipping SEC Form 4 / 13D", file=sys.stderr)
     collector = TradeCollector(edgar, _requests_get, resolver.name if resolver else None)
     trades = collector.collect(investors.values(), days)
-    for err in collector.errors:
+    errors = list(collector.errors)
+    if store is not None:
+        from .ark import ARK_FUNDS, ArkCollector
+        for inv in investors.values():
+            funds = inv.handles.get("ark")
+            if not funds:
+                continue
+            wanted = {f.strip().upper() for f in funds.split(",")}
+            ark = ArkCollector(store, _requests_get,
+                               {f: u for f, u in ARK_FUNDS.items() if f in wanted}, inv.key)
+            trades += ark.collect()
+            errors += ark.errors
+    for err in errors:
         print(f"warning: {err}", file=sys.stderr)
     return trades

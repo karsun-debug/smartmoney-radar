@@ -27,6 +27,13 @@ CREATE TABLE IF NOT EXISTS trades (
     amount_text TEXT, url TEXT
 );
 CREATE INDEX IF NOT EXISTS trades_traded ON trades(traded);
+CREATE TABLE IF NOT EXISTS ark_holdings (
+    fund TEXT NOT NULL, day TEXT NOT NULL, key TEXT NOT NULL, ticker TEXT, company TEXT,
+    cusip TEXT, shares REAL, value REAL, PRIMARY KEY (fund, day, key)
+);
+CREATE TABLE IF NOT EXISTS alerts_sent (
+    uid TEXT PRIMARY KEY, kind TEXT NOT NULL, sent_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS prices (
     ticker TEXT NOT NULL, day TEXT NOT NULL, close REAL NOT NULL, PRIMARY KEY (ticker, day)
 );
@@ -129,6 +136,45 @@ class Store:
     def prices(self, ticker: str) -> list[tuple[date, float]]:
         return [(date.fromisoformat(d), c) for d, c in self.db.execute(
             "SELECT day, close FROM prices WHERE ticker = ? ORDER BY day", (ticker,))]
+
+    # ------------------------------------------------------------- ARK
+    def save_ark(self, fund: str, day: date, rows) -> None:
+        self.db.executemany("INSERT OR REPLACE INTO ark_holdings VALUES (?,?,?,?,?,?,?,?)",
+                            [(fund, day.isoformat(), h.key, h.ticker, h.company, h.cusip,
+                              h.shares, h.value) for h in rows])
+        self.db.commit()
+
+    def ark_previous(self, fund: str, day: date):
+        """Most recent stored holdings strictly before ``day``: (day, rows) or (None, [])."""
+        from .ark import ArkHolding
+        r = self.db.execute("SELECT MAX(day) FROM ark_holdings WHERE fund = ? AND day < ?",
+                            (fund, day.isoformat())).fetchone()
+        if not r or not r[0]:
+            return None, []
+        rows = self.db.execute("SELECT ticker, company, cusip, shares, value FROM ark_holdings"
+                               " WHERE fund = ? AND day = ?", (fund, r[0])).fetchall()
+        return date.fromisoformat(r[0]), [ArkHolding(*row) for row in rows]
+
+    # ------------------------------------------------------------- alerts
+    def alerted(self, uids: Iterable[str]) -> set[str]:
+        uids = list(uids)
+        if not uids:
+            return set()
+        out: set[str] = set()
+        for i in range(0, len(uids), 500):
+            chunk = uids[i:i + 500]
+            out |= {r[0] for r in self.db.execute(
+                f"SELECT uid FROM alerts_sent WHERE uid IN ({','.join('?' * len(chunk))})", chunk)}
+        return out
+
+    def mark_alerted(self, items: Iterable[tuple[str, str]]) -> None:
+        now = datetime.now().isoformat(timespec="seconds")
+        self.db.executemany("INSERT OR IGNORE INTO alerts_sent VALUES (?,?,?)",
+                            [(uid, kind, now) for uid, kind in items])
+        self.db.commit()
+
+    def alerts_count(self) -> int:
+        return self.db.execute("SELECT COUNT(*) FROM alerts_sent").fetchone()[0]
 
     @staticmethod
     def _post(r) -> Post:

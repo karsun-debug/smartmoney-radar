@@ -10,12 +10,15 @@
 - **即時對帳單**：Form 4、13D/G、國會議員交易申報（Pelosi 等），每筆附原始文件連結。
 - **言行比對**：發言 vs 實際申報交易，以及 vs 13F 季度持倉。
 - **喊單勝率**：發言後 30 / 90 天股價表現，排出誰最準。
-- **LINE 推播**：每天早上收到摘要。
+- **ARK 每日交易**：比對 ARK 每天公布的持股檔，算出 Cathie Wood 當天買賣了什麼（已扣除 ETF 申購贖回造成的整體變動）。
+- **LINE 推播**：每天早上收到摘要；有新喊單或新申報交易時**即時通知**（每 2 小時檢查一次）。
 - **網頁儀表板**：產業熱度變化圖、每位大神一頁、每檔個股一頁，手機可看、支援深色模式。
 
 與 GitHub 上同類專案的比較見 [docs/DESIGN.md](docs/DESIGN.md#7-與-github-同類專案比較2026-11-調查)。
 
 設計細節見 [docs/DESIGN.md](docs/DESIGN.md)。
+
+> **第一次使用請看 [docs/SETUP.md](docs/SETUP.md)**：一步一步設定 LINE、GitHub 自動執行，並用 `spiderhead doctor` 檢查。
 
 ## 安裝
 
@@ -84,6 +87,12 @@ spiderhead push-line --days 1 --dry-run
 ```
 
 確認內容後拿掉 `--dry-run` 就會送出。
+
+即時通知（新喊單、新申報交易，每則只送一次；第一次執行只記錄不送，避免一次湧入歷史資料）：
+
+```bash
+spiderhead fetch --days 2 && spiderhead alert
+```
 
 ### 網頁儀表板
 

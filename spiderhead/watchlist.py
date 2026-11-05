@@ -21,7 +21,7 @@ DEFAULT_WATCHLIST: list[Investor] = [
              {"x": "BillAckman"}, "13F",
              "X 上最活躍的避險基金經理之一，常公開長文說明持倉；集中持股，13F 很好對照。"),
     Investor("wood", "Cathie Wood", "ARK Investment Management", "0001697748",
-             {"x": "CathieDWood"}, "13F+daily",
+             {"x": "CathieDWood", "ark": "ARKK,ARKQ,ARKW,ARKG,ARKF,ARKX"}, "13F+daily",
              "除 13F 外，ARK ETF 每天公布交易明細，是最即時的對帳單。"),
     Investor("burry", "Michael Burry", "Scion Asset Management", "0001649339",
              {"x": "michaeljburry"}, "13F",

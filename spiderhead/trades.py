@@ -72,6 +72,27 @@ def parse_subject_company(header_text: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+ASSET_KIND = {"ST": "", "OP": "選擇權", "OT": "其他", "GS": "政府債", "CS": "公司債", "PS": "特別股",
+              "EF": "ETF", "MF": "基金", "CT": "加密貨幣"}
+
+
+def clean_asset(desc: str) -> tuple[str, str, str, float | None]:
+    """Split a disclosure asset string into (name, kind label, detail note, shares).
+
+    House PTRs read like "Bloom Energy Corp (BE) [ST] F S: New D: Purchased 10,000 shares."
+    after the PDF text extraction (which also leaves NUL bytes behind).
+    """
+    desc = " ".join(desc.replace("\x00", "").split())
+    kind_m = re.search(r"\[([A-Z]{2})\]", desc)
+    name = desc[:kind_m.start()].strip() if kind_m else desc
+    detail_m = re.search(r"\bD\s*:\s*(.+)$", desc)
+    detail = detail_m.group(1).strip() if detail_m else ""
+    shares_m = re.search(r"([\d,]+(?:\.\d+)?)\s+shares", detail, re.I)
+    shares = float(shares_m.group(1).replace(",", "")) if shares_m else None
+    kind = ASSET_KIND.get(kind_m.group(1), kind_m.group(1)) if kind_m else ""
+    return name, kind, detail, shares
+
+
 def parse_congress_rows(rows: Iterable[dict], members: dict[str, str],
                         since: date | None = None) -> list[Trade]:
     """Convert LuxAlgo congress-trade rows for watched members into Trades.
@@ -90,11 +111,16 @@ def parse_congress_rows(rows: Iterable[dict], members: dict[str, str],
             continue
         rng = r.get("amountRange") or {}
         owner = r.get("owner")
+        name, kind, detail, shares = clean_asset(r.get("assetDescription", ""))
         text = rng.get("text", "") + (f"（{OWNER.get(owner, owner)}）" if owner else "")
+        if kind:
+            text += f" · {kind}"
+        if detail and kind:                      # options: keep strike / expiry note
+            text += f"：{detail}"
         out.append(Trade(
             key, traded, date.fromisoformat(r["filedAt"]), r["side"], "PTR",
-            (r.get("ticker") or None) and r["ticker"].upper(), r.get("assetDescription", ""),
-            None, None, text, (r.get("provenance") or {}).get("sourceUrl")))
+            (r.get("ticker") or None) and r["ticker"].upper(), name,
+            None if kind else shares, None, text, (r.get("provenance") or {}).get("sourceUrl")))
     return out
 
 
