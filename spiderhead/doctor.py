@@ -51,6 +51,12 @@ def run_checks(get: Getter, env: dict[str, str] | None = None) -> list[Check]:
     else:
         checks.append(Check(WARN, "LINE token", "未設定 LINE_CHANNEL_ACCESS_TOKEN，不會推播"))
 
+    from .channels import configured_channels
+    chans = [c.name for c in configured_channels(env)]
+    if chans:
+        checks.append(Check(OK, "通知管道", "、".join(chans)))
+    else:
+        checks.append(Check(WARN, "通知管道", "未設定任何管道，每日摘要與即時通知不會送出"))
     checks.append(_try("Google News", lambda: f"{len(get('https://news.google.com/rss/search?q=%22Bill+Ackman%22&hl=en-US&gl=US&ceid=US:en', {}))} bytes", WARN))
     def house() -> str:
         from datetime import date

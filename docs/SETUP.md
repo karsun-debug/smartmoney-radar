@@ -100,6 +100,19 @@ spiderhead push-line --days 7
 > **訊息額度**：LINE 官方帳號免費方案每月有訊息則數上限（台灣「輕用量」方案目前為每月 200 則，請以 Official Account Manager 顯示為準）。
 > 每日摘要約 30 則/月；即時通知只在有新喊單或新申報時才送，通常每天 0–5 則。若接近上限，可以把 `alerts.yml` 的頻率調低。
 
+## 步驟 2.5（選填）：其他通知管道
+
+有設定哪個就推哪個，可以同時用好幾個（一個壞掉不影響其他）：
+
+| 管道 | 要設定的 Secrets | 怎麼拿 |
+|---|---|---|
+| Telegram | `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID` | 找 @BotFather 建 bot 拿 token；傳一則訊息給 bot 後，開 `https://api.telegram.org/bot<token>/getUpdates` 看 `chat.id` |
+| Discord | `DISCORD_WEBHOOK_URL` | 頻道設定 → 整合 → Webhook → 複製網址 |
+| Slack | `SLACK_WEBHOOK_URL` | 建立 Slack App → Incoming Webhooks |
+| Email | `SMTP_HOST`、`SMTP_USER`、`SMTP_PASSWORD`、`EMAIL_TO`（選填 `SMTP_PORT`、`EMAIL_FROM`） | Gmail：`smtp.gmail.com`、埠 587，密碼要用「應用程式密碼」 |
+
+`spiderhead doctor` 會列出目前啟用的管道。
+
 ## 步驟 3：讓 GitHub 每天自動跑
 
 1. GitHub repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**，加入：

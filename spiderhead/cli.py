@@ -108,7 +108,8 @@ def main(argv: list[str] | None = None) -> int:
     al.add_argument("--include-news", action="store_true", help="新聞報導中的喊單也通知")
     al.add_argument("--lookback", type=int, default=3, help="只看最近 N 天的資料")
 
-    pl = sub.add_parser("push-line", help="把摘要推播到 LINE")
+    pl = sub.add_parser("push-line", aliases=["push"],
+                        help="把摘要推播到所有已設定的管道（LINE / Telegram / Discord / Slack / Email）")
     pl.add_argument("--days", type=int, default=1, help="摘要涵蓋最近 N 天（預設 1）")
     pl.add_argument("--dashboard-url", help="附在訊息最後的儀表板網址")
     pl.add_argument("--dry-run", action="store_true", help="只印出訊息，不送出")
@@ -193,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{inv.key:14} CIK {inv.cik}  expected: {inv.fund:40} SEC: {name}")
         return 0
 
+    if args.cmd == "push":
+        args.cmd = "push-line"
     if args.cmd in ("fetch", "import", "feed", "trends", "digest", "push-line", "dashboard", "alert",
                     "insiders"):
         return _store_commands(args, investors)
@@ -291,22 +294,24 @@ def _store_commands(args, investors) -> int:
     if args.cmd == "push-line":
         import os
         from .digest import build_digest
-        from .notify import LineNotifier, format_line
+        from .notify import format_line
         url = args.dashboard_url or os.environ.get("SPIDERHEAD_DASHBOARD_URL")
         text = format_line(build_digest(store, investors, args.days), url)
         if args.dry_run:
             print(text)
             return 0
-        n = LineNotifier().send(text)
-        print(f"已送出 LINE（{n} 次請求）")
-        return 0
+        return _broadcast(text)
 
     if args.cmd == "alert":
         from .alerts import run_alerts
         send = None
         if not args.dry_run:
-            from .notify import LineNotifier
-            send = LineNotifier().send
+            from .channels import Broadcast, configured_channels
+            chans = configured_channels()
+            if not chans:
+                print("沒有設定任何通知管道（LINE / Telegram / Discord / Slack / Email），略過", file=sys.stderr)
+                return 0
+            send = lambda text: _report(Broadcast(chans).send(text))  # noqa: E731
         n, text = run_alerts(store, investors, send, dry_run=args.dry_run, backfill=args.backfill,
                              lookback_days=args.lookback, include_news=args.include_news)
         if text:
@@ -423,3 +428,23 @@ def _collect_trades(investors, days: int, store=None):
 
 def _name_map(investors) -> dict[str, str]:
     return {k: v.name for k, v in investors.items()}
+
+
+def _report(results) -> None:
+    for name, err in results:
+        print(f"{'✅' if not err else '❌'} {name}" + (f"：{err}" if err else ""),
+              file=sys.stderr if err else sys.stdout)
+
+
+def _broadcast(text: str) -> int:
+    from .channels import Broadcast, configured_channels
+    chans = configured_channels()
+    if not chans:
+        print("沒有設定任何通知管道（LINE / Telegram / Discord / Slack / Email），略過", file=sys.stderr)
+        return 0
+    try:
+        _report(Broadcast(chans).send(text))
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
