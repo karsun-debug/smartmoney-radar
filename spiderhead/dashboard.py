@@ -292,6 +292,23 @@ def tradecheck_table(items: list[TradeCheck], root: str) -> str:
             f'<th>實際交易</th><th>判定</th></tr>{rows}</table></div>')
 
 
+def health_table(statuses) -> str:
+    if not statuses:
+        return '<p class="empty">尚無抓取紀錄。</p>'
+    icon = {"ok": ("✓", "正常", "bull"), "warn": ("!", "部分失敗", "neutral"), "fail": ("✕", "異常", "bear")}
+    rows = []
+    for h in sorted(statuses, key=lambda h: ({"fail": 0, "warn": 1, "ok": 2}[h.level], h.name)):
+        i, label, cls = icon[h.level]
+        last_ok = f"{h.last_ok:%m/%d %H:%M}" if h.last_ok else "從未成功"
+        err = f'<div class="sub">{esc(h.last_error[:140])}</div>' if h.last_error else ""
+        rows.append(f'<tr><td>{esc(h.name)}</td><td><span class="badge {cls}"><span class="i">{i}</span>{label}</span></td>'
+                    f'<td>{last_ok}</td><td class="num">{h.ok_now}/{h.ok_now + h.failing_now}</td>'
+                    f'<td class="num">{h.items_7d}</td><td>{err}</td></tr>')
+    return ('<div class="tablewrap"><table><tr><th>來源</th><th>狀態</th><th>最後成功</th>'
+            '<th class="num">最近一次</th><th class="num">7 天筆數</th><th>錯誤</th></tr>'
+            + "".join(rows) + '</table></div>')
+
+
 def render_ticker(store: Store, ticker: str, names: dict[str, str], days: int,
                   prices: PriceBook | None) -> str:
     start, end = window(days)
@@ -391,7 +408,8 @@ def render_index(store: Store, investors: dict[str, Investor], days: int, step: 
             f'{trades_table(store.trades_between(end - timedelta(days=29), end, by="filed"), names, "", limit=20)}'
             f'<h2>喊單勝率排行</h2>{scoreboard_table(calls or [], names)}'
             f'<h2>大神</h2><div class="grid">{"".join(inv_cards)}</div>'
-            f'<h2>最新動態</h2>{_feed_html(recent.feed, names, "")}')
+            f'<h2>最新動態</h2>{_feed_html(recent.feed, names, "")}'
+            f'<h2>資料來源狀態</h2>{health_table(store.source_health())}')
     return _page("Smartmoney Radar 大神追蹤", body, "")
 
 

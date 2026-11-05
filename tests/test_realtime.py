@@ -124,3 +124,35 @@ def test_doctor_reports():
     assert checks["Google News"].status == WARN and checks["股價 (Stooq)"].status == OK
     bad = run_checks(get, {})
     assert bad[0].status == FAIL and "必須修正" in format_checks(bad)
+
+
+def test_source_health_roundtrip_and_line_warning():
+    from datetime import datetime
+    from spiderhead.digest import build_digest
+    from spiderhead.health import SourceResult
+    from spiderhead.notify import format_line
+    store = Store(":memory:")
+    old = datetime.now() - timedelta(days=5)
+    store.log_results([SourceResult("ark", "ARKK", True, 3)], at=old)
+    store.log_results([SourceResult("ark", "ARKK", False, 0, "404 Not Found"),
+                       SourceResult("news", "news:ackman", True, 12)])
+    health = {h.family: h for h in store.source_health()}
+    assert health["ark"].level == "fail" and "404" in health["ark"].last_error
+    assert health["news"].level == "ok" and health["news"].items_7d == 12
+    text = format_line(build_digest(store, load_watchlist(), 1))
+    assert "⚠️ 資料來源異常：ARK 每日持股" in text
+
+
+def test_collectors_record_health():
+    from spiderhead.sources import Collector, load_sources
+    inv = load_watchlist()
+    cfg = load_sources(inv)
+
+    def get(url, h):
+        if "Ackman" in url:
+            return b"<rss><channel></channel></rss>"
+        raise ConnectionError("down")
+    c = Collector(cfg, http_get=get, x_token="")
+    c.collect(days=3)
+    fams = {(r.family, r.ok) for r in c.health.results}
+    assert ("news", True) in fams and ("news", False) in fams and ("industry", False) in fams

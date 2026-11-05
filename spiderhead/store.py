@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS ark_holdings (
 CREATE TABLE IF NOT EXISTS alerts_sent (
     uid TEXT PRIMARY KEY, kind TEXT NOT NULL, sent_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS source_runs (
+    at TEXT NOT NULL, family TEXT NOT NULL, label TEXT NOT NULL, ok INTEGER NOT NULL,
+    items INTEGER NOT NULL DEFAULT 0, detail TEXT
+);
+CREATE INDEX IF NOT EXISTS source_runs_family ON source_runs(family, at);
 CREATE TABLE IF NOT EXISTS prices (
     ticker TEXT NOT NULL, day TEXT NOT NULL, close REAL NOT NULL, PRIMARY KEY (ticker, day)
 );
@@ -165,6 +170,37 @@ class Store:
         rows = self.db.execute("SELECT ticker, company, cusip, shares, value FROM ark_holdings"
                                " WHERE fund = ? AND day = ?", (fund, r[0])).fetchall()
         return date.fromisoformat(r[0]), [ArkHolding(*row) for row in rows]
+
+    # ------------------------------------------------------------- health
+    def log_results(self, results, at: datetime | None = None) -> None:
+        stamp = (at or datetime.now()).isoformat(timespec="seconds")
+        self.db.executemany("INSERT INTO source_runs VALUES (?,?,?,?,?,?)",
+                            [(stamp, r.family, r.label, int(r.ok), r.items, r.detail) for r in results])
+        # Keep 60 days of history.
+        cutoff = ((at or datetime.now()) - timedelta(days=60)).isoformat(timespec="seconds")
+        self.db.execute("DELETE FROM source_runs WHERE at < ?", (cutoff,))
+        self.db.commit()
+
+    def source_health(self):
+        from .health import FamilyStatus
+        out = []
+        week = (datetime.now() - timedelta(days=7)).isoformat(timespec="seconds")
+        for (family,) in self.db.execute("SELECT DISTINCT family FROM source_runs ORDER BY family"):
+            last_run = self.db.execute("SELECT MAX(at) FROM source_runs WHERE family = ?",
+                                       (family,)).fetchone()[0]
+            last_ok = self.db.execute("SELECT MAX(at) FROM source_runs WHERE family = ? AND ok = 1",
+                                      (family,)).fetchone()[0]
+            ok_now, bad_now = self.db.execute(
+                "SELECT SUM(ok), SUM(1 - ok) FROM source_runs WHERE family = ? AND at = ?",
+                (family, last_run)).fetchone()
+            items = self.db.execute("SELECT COALESCE(SUM(items), 0) FROM source_runs"
+                                    " WHERE family = ? AND at >= ?", (family, week)).fetchone()[0]
+            err = self.db.execute("SELECT label || ': ' || detail FROM source_runs WHERE family = ?"
+                                  " AND ok = 0 AND at = ? LIMIT 1", (family, last_run)).fetchone()
+            out.append(FamilyStatus(family, datetime.fromisoformat(last_run),
+                                    datetime.fromisoformat(last_ok) if last_ok else None,
+                                    ok_now or 0, bad_now or 0, items, err[0] if err else ""))
+        return out
 
     # ------------------------------------------------------------- alerts
     def alerted(self, uids: Iterable[str]) -> set[str]:

@@ -135,6 +135,8 @@ class TradeCollector:
         self.get = http_get
         self.name_to_ticker = name_to_ticker or (lambda name: None)
         self.errors: list[str] = []
+        from .health import HealthLog
+        self.health = HealthLog()
 
     def collect(self, investors: Iterable[Investor], days: int = 30) -> list[Trade]:
         since = date.today() - timedelta(days=days)
@@ -146,24 +148,34 @@ class TradeCollector:
                 chamber[inv.handles["congress"]] = inv.key
             elif inv.cik and self.edgar is not None:
                 try:
-                    trades += self._sec(inv, since)
+                    got = self._sec(inv, since)
+                    trades += got
+                    self.health.record("sec", inv.key, True, len(got))
                 except Exception as exc:
                     self.errors.append(f"sec:{inv.key}: {exc}")
+                    self.health.record("sec", inv.key, False, 0, str(exc))
         if house and self.get is not None:
             # Primary: the House Clerk itself. Fallback: LuxAlgo's parsed dataset.
             from .house import HouseCollector
             hc = HouseCollector(self.get)
             try:
-                trades += hc.collect(house, since)
+                got = hc.collect(house, since)
+                trades += got
+                self.health.record("house", "index", True, len(got),
+                                   f"{len(hc.errors)} PDF errors" if hc.errors else "")
             except Exception as exc:
                 self.errors.append(f"house clerk: {exc}; falling back to LuxAlgo dataset")
+                self.health.record("house", "index", False, 0, str(exc))
                 senate.update(house)
             self.errors += hc.errors
         if senate and self.get is not None:
             try:
-                trades += self._congress(senate, since)
+                got = self._congress(senate, since)
+                trades += got
+                self.health.record("congress", "luxalgo", True, len(got))
             except Exception as exc:
                 self.errors.append(f"congress: {exc}")
+                self.health.record("congress", "luxalgo", False, 0, str(exc))
         return trades
 
     def _sec(self, inv: Investor, since: date) -> list[Trade]:

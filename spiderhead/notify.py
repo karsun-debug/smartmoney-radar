@@ -75,6 +75,10 @@ def format_line(d: Digest, dashboard_url: str | None = None, max_posts: int = 8)
             out.append(f"  {post.url}")
     if len(d.feed) > max_posts:
         out.append(f"…還有 {len(d.feed) - max_posts} 則")
+    broken = [h for h in d.health if h.level == "fail"]
+    if broken:
+        out += ["", "⚠️ 資料來源異常：" + "、".join(
+            f"{h.name}（{'從未成功' if not h.last_ok else f'{h.last_ok:%m/%d} 後未成功'}）" for h in broken)]
     if dashboard_url:
         out += ["", f"📈 儀表板：{dashboard_url}"]
     out += ["", "僅供研究參考，不構成投資建議。"]

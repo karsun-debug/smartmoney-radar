@@ -225,6 +225,7 @@ def _store_commands(args, investors) -> int:
             collector = Collector(load_sources(investors, args.sources))
             posts = collector.collect(args.days, news=not args.no_news,
                                       industries=not args.no_industry)
+            store.log_results(collector.health.results)
             for err in collector.errors:
                 print(f"warning: {err}", file=sys.stderr)
         else:
@@ -278,6 +279,10 @@ def _store_commands(args, investors) -> int:
                            prices=prices)
         for err in (prices.errors if prices else [])[:3]:
             print(f"warning: {err}", file=sys.stderr)
+        if prices is not None:
+            from .health import SourceResult
+            store.log_results([SourceResult("prices", "stooq", not prices.errors, len(prices._cache),
+                                            "; ".join(prices.errors[:2]))])
         print(f"已產生 {index}")
         return 0
 
@@ -335,6 +340,8 @@ def _collect_trades(investors, days: int, store=None):
     trades = collector.collect(investors.values(), days)
     errors = list(collector.errors)
     if store is not None:
+        store.log_results(collector.health.results)
+    if store is not None:
         from .ark import ARK_FUNDS, ArkCollector
         for inv in investors.values():
             funds = inv.handles.get("ark")
@@ -345,6 +352,7 @@ def _collect_trades(investors, days: int, store=None):
                                {f: u for f, u in ARK_FUNDS.items() if f in wanted}, inv.key)
             trades += ark.collect()
             errors += ark.errors
+            store.log_results(ark.health.results)
     for err in errors:
         print(f"warning: {err}", file=sys.stderr)
     return trades

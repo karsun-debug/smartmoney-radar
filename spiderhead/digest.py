@@ -26,6 +26,7 @@ class Digest:
     consensus: list[TickerConsensus]
     names: dict[str, str]
     trades: list[Trade] = field(default_factory=list)  # filed in the window, newest first
+    health: list = field(default_factory=list)          # FamilyStatus per data source
 
 
 def build_digest(store: Store, investors: dict[str, Investor], days: int,
@@ -40,6 +41,7 @@ def build_digest(store: Store, investors: dict[str, Investor], days: int,
         sector_trends(cur, store.signals_between(prev_start, prev_end)),
         consensus(cur), display_names(investors),
         [t for t in store.trades_between(start, end, by="filed") if t.investor_key in investors],
+        store.source_health(),
     )
 
 

@@ -100,6 +100,8 @@ class Collector:
         self.get = http_get
         self.x_token = x_token if x_token is not None else os.environ.get("X_BEARER_TOKEN")
         self.errors: list[str] = []
+        from .health import HealthLog
+        self.health = HealthLog()
 
     def collect(self, days: int = 7, news: bool = True, industries: bool = True) -> list[Post]:
         since = date.today() - timedelta(days=days)
@@ -119,11 +121,15 @@ class Collector:
         return [p for p in posts if p.published >= since]
 
     def _try(self, label: str, fn: Callable[[], list[Post]]) -> list[Post]:
+        family = label.split(":", 1)[0] if label.split(":", 1)[0] in ("x", "news", "industry") else "rss"
         try:
-            return fn()
+            got = fn()
         except Exception as exc:  # one dead feed must not stop the run
             self.errors.append(f"{label}: {exc}")
+            self.health.record(family, label, False, 0, str(exc))
             return []
+        self.health.record(family, label, True, len(got))
+        return got
 
     def _news(self, query: str, owner: str, kind: str) -> list[Post]:
         body = self.get(GOOGLE_NEWS_RSS.format(q=quote_plus(query)), {})

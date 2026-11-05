@@ -118,6 +118,8 @@ class ArkCollector:
         self.funds = funds or ARK_FUNDS
         self.investor_key = investor_key
         self.errors: list[str] = []
+        from .health import HealthLog
+        self.health = HealthLog()
 
     def collect(self) -> list[Trade]:
         trades: list[Trade] = []
@@ -126,12 +128,15 @@ class ArkCollector:
                 day, rows = parse_ark_csv(self.get(url, {}).decode("utf-8", "replace"))
             except Exception as exc:
                 self.errors.append(f"ark {fund}: {exc}")
+                self.health.record("ark", fund, False, 0, str(exc))
                 continue
             if not day or not rows:
                 self.errors.append(f"ark {fund}: no holdings parsed")
+                self.health.record("ark", fund, False, 0, "no holdings parsed (file format changed?)")
                 continue
             prev_day, prev = self.store.ark_previous(fund, day)
             self.store.save_ark(fund, day, rows)
-            if prev:
-                trades += diff_ark(fund, prev, rows, day, self.investor_key)
+            found = diff_ark(fund, prev, rows, day, self.investor_key) if prev else []
+            trades += found
+            self.health.record("ark", fund, True, len(found), f"{len(rows)} holdings on {day}")
         return trades
