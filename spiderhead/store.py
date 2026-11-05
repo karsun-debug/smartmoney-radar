@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS source_runs_family ON source_runs(family, at);
 CREATE TABLE IF NOT EXISTS holdings_13f (
     investor TEXT NOT NULL, quarter TEXT NOT NULL, accession TEXT NOT NULL, cusip TEXT NOT NULL,
     put_call TEXT NOT NULL DEFAULT '', ticker TEXT, issuer TEXT, title TEXT, shares INTEGER,
-    value INTEGER, PRIMARY KEY (investor, quarter, cusip, put_call)
+    value INTEGER, filed TEXT, PRIMARY KEY (investor, quarter, cusip, put_call)
 );
 CREATE TABLE IF NOT EXISTS prices (
     ticker TEXT NOT NULL, day TEXT NOT NULL, close REAL NOT NULL, PRIMARY KEY (ticker, day)
@@ -69,6 +69,10 @@ class Store:
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(signals)")}
         if "attributed" not in cols:
             self.db.execute("ALTER TABLE signals ADD COLUMN attributed INTEGER NOT NULL DEFAULT 0")
+            self.db.commit()
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(holdings_13f)")}
+        if "filed" not in cols:
+            self.db.execute("ALTER TABLE holdings_13f ADD COLUMN filed TEXT")
             self.db.commit()
 
     def add_posts(self, posts: Iterable[Post]) -> int:
@@ -160,14 +164,24 @@ class Store:
 
     # ------------------------------------------------------------- 13F history
     def save_13f(self, investor: str, quarter: str, accession: str, holdings,
-                 resolve=None) -> None:
+                 resolve=None, filed: date | None = None) -> None:
         """Replace one quarter's 13F holdings (tickers resolved once, at save time)."""
         self.db.execute("DELETE FROM holdings_13f WHERE investor = ? AND quarter = ?", (investor, quarter))
         self.db.executemany(
-            "INSERT OR REPLACE INTO holdings_13f VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO holdings_13f (investor, quarter, accession, cusip, put_call, ticker,"
+            " issuer, title, shares, value, filed) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             [(investor, quarter, accession, h.cusip, h.put_call or "", resolve(h) if resolve else None,
-              h.issuer, h.title_of_class, h.shares, h.value_usd) for h in holdings])
+              h.issuer, h.title_of_class, h.shares, h.value_usd, filed.isoformat() if filed else None)
+             for h in holdings])
         self.db.commit()
+
+    def filed_13f(self, investor: str, quarter: str) -> date:
+        """Filing date of a stored quarter (quarter end + 45 days when unknown)."""
+        r = self.db.execute("SELECT MAX(filed) FROM holdings_13f WHERE investor = ? AND quarter = ?",
+                            (investor, quarter)).fetchone()
+        if r and r[0]:
+            return date.fromisoformat(r[0])
+        return date.fromisoformat(quarter) + timedelta(days=45)
 
     def accession_13f(self, investor: str, quarter: str) -> str | None:
         r = self.db.execute("SELECT accession FROM holdings_13f WHERE investor = ? AND quarter = ? LIMIT 1",

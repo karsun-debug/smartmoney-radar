@@ -119,7 +119,7 @@ def safe_url(url: str | None) -> str | None:
     return None
 
 
-NAV = [("index.html", "總覽"), ("consensus.html", "大神共同持股")]
+NAV = [("index.html", "總覽"), ("consensus.html", "大神共同持股"), ("clone.html", "跟單回測")]
 
 
 def _nav(root: str, active: str) -> str:
@@ -391,9 +391,42 @@ def _ticker_13f(consensus, ticker: str, names: dict[str, str]) -> str:
             '<th class="num">占其組合</th><th>最新一季動作</th><th>季度</th></tr>' + trs + '</table></div>')
 
 
-def render_consensus(store: Store, investors: dict[str, Investor], names: dict[str, str]) -> str:
-    from .consensus13f import build_consensus
-    c = build_consensus(store, investors)
+def clone_periods_table(res, root: str) -> str:
+    rows = "".join(
+        f'<tr><td>{esc(p.quarter)}</td><td>{p.entry} → {p.exit}</td>'
+        f'<td class="num">{_pct(p.ret)}</td><td class="num">{_pct(p.bench)}</td>'
+        f'<td class="num">{p.coverage * 100:.0f}%</td><td>'
+        + "、".join(f"{_tick(t, root)} {_pct(r)}" for t, _, r in sorted(p.holdings, key=lambda x: -x[1])[:5])
+        + "</td></tr>" for p in reversed(res.periods))
+    return ('<div class="tablewrap"><table><tr><th>13F 季度</th><th>持有期間（公布日起）</th>'
+            '<th class="num">跟單報酬</th><th class="num">SPY</th><th class="num">有股價的權重</th>'
+            '<th>主要持股表現</th></tr>' + rows + '</table></div>')
+
+
+def render_clone(results, names: dict[str, str], has_prices: bool) -> str:
+    note = ('<p class="sub">每季在 13F <strong>公布當天</strong>買進該大神前 10 大持股（依其權重），持有到下一季公布日；'
+            '最新一季持有到今天。未計股利、交易成本與稅；沒有代號或股價的持股會略過並重新分配權重。'
+            '過去績效不代表未來。</p>')
+    if not results:
+        why = ("還沒有 13F 歷史，執行 <code>spiderhead dashboard --with-13f</code>。" if has_prices
+               else "需要股價資料（不要加 <code>--no-prices</code>）。")
+        return _page("跟單回測 · Smartmoney Radar", f"<h1>跟單回測</h1>{note}<p class=empty>{why}</p>",
+                     "", "clone.html")
+    rows = "".join(
+        f'<tr><td><a href="investor/{esc(r.investor)}.html">{esc(names.get(r.investor, r.investor))}</a></td>'
+        f'<td class="num">{len(r.periods)}</td><td class="num">{_pct(r.total)}</td>'
+        f'<td class="num">{_pct(r.bench_total)}</td><td class="num">{_pct(r.excess)}</td>'
+        f'<td class="num">{"—" if r.beat_rate is None else f"{r.beat_rate * 100:.0f}%"}</td></tr>'
+        for r in results)
+    board = ('<div class="tablewrap"><table><tr><th>大神</th><th class="num">季數</th>'
+             '<th class="num">跟單累積報酬</th><th class="num">同期 SPY</th><th class="num">超額報酬</th>'
+             '<th class="num">贏過 SPY 的季度</th></tr>' + rows + '</table></div>')
+    details = "".join(f'<h2>{esc(names.get(r.investor, r.investor))}</h2>{clone_periods_table(r, "")}'
+                      for r in results)
+    return _page("跟單回測 · Smartmoney Radar", f"<h1>跟單回測</h1>{note}{board}{details}", "", "clone.html")
+
+
+def render_consensus(c, names: dict[str, str]) -> str:
     if not c.quarters:
         body = ('<h1>大神共同持股</h1><p class="empty">還沒有 13F 歷史資料。執行 '
                 '<code>spiderhead dashboard --with-13f</code> 下載最近 4 季後就會出現。</p>')
@@ -537,7 +570,7 @@ def render_index(store: Store, investors: dict[str, Investor], days: int, step: 
 
 def render_investor(store: Store, inv: Investor, names: dict[str, str], days: int, step: int,
                     holdings: tuple[str, list[PositionChange], list[ConsistencyItem]] | None = None,
-                    calls: list[CallResult] | None = None) -> str:
+                    calls: list[CallResult] | None = None, clone=None) -> str:
     start, end = window(days)
     prof = investor_profile(store, inv, start, end, step)
     buckets, activity = prof.activity
@@ -595,6 +628,11 @@ def render_investor(store: Store, inv: Investor, names: dict[str, str], days: in
     else:
         h13 = f'<p class="empty">此人以 {esc(PROOF.get(inv.proof, inv.proof))} 驗證，尚未支援自動比對。</p>'
 
+    clone_html = ""
+    if clone is not None and clone.periods:
+        clone_html = (f'<h2>跟單回測</h2><p class="sub">照 13F 公布日跟買前 10 大持股：累積 {_pct(clone.total)}，'
+                      f'同期 SPY {_pct(clone.bench_total)}。<a href="../clone.html">說明與排行</a></p>'
+                      f'{clone_periods_table(clone, "../")}')
     trades = store.trades_between(start - timedelta(days=90), end, inv.key)
     trades_html = trades_table(trades, names, "../", show_who=False)
     own_sigs = [sg for p, sigs in prof.posts for sg in sigs if sg.is_own_view]
@@ -616,6 +654,7 @@ def render_investor(store: Store, inv: Investor, names: dict[str, str], days: in
             f'<h2>言行一致：發言 vs 實際交易</h2>{tradecheck_table(checks, "../")}'
             f'<h2>喊單成績</h2>{calls_table(my_calls, "../")}'
             f'<h2>13F 季度持倉</h2>{h13}'
+            f'{clone_html}'
             f'<h2>發文紀錄</h2>{_feed_html(prof.posts, names, "../", limit=100, link_investor=False)}')
     return _page(f"{inv.name} · Smartmoney Radar", body, "../", "")
 
@@ -638,11 +677,16 @@ def build_site(store: Store, investors: dict[str, Investor], out_dir: str | Path
     calls = score_calls(store.signals_between(start - timedelta(days=270), end), prices) if prices else []
     (out / "index.html").write_text(render_index(store, investors, days, step, calls=calls),
                                     encoding="utf-8")
-    (out / "consensus.html").write_text(render_consensus(store, investors, names), encoding="utf-8")
     from .consensus13f import build_consensus
     consensus = build_consensus(store, investors)
+    (out / "consensus.html").write_text(render_consensus(consensus, names), encoding="utf-8")
+    from .clone import backtest_all
+    clones = backtest_all(store, investors, prices) if prices is not None else []
+    (out / "clone.html").write_text(render_clone(clones, names, prices is not None), encoding="utf-8")
+    clone_by = {r.investor: r for r in clones}
     for inv in investors.values():
-        page = render_investor(store, inv, names, days, step, (holdings or {}).get(inv.key), calls)
+        page = render_investor(store, inv, names, days, step, (holdings or {}).get(inv.key), calls,
+                               clone_by.get(inv.key))
         (out / "investor" / f"{inv.key}.html").write_text(page, encoding="utf-8")
     tickers = {s.ticker for s in store.signals_between(start, end)
                if not s.ticker.startswith(("SECTOR:", "MACRO:"))}

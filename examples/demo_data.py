@@ -58,7 +58,8 @@ def main(days: int = 90, seed: int = 7) -> None:
 
     # Synthetic prices (random walks with a drift) so call scoring has data.
     drift = {"NVDA": 0.004, "GOOGL": 0.002, "TSLA": -0.001, "BABA": 0.001, "CB": 0.0005,
-             "META": 0.0015, "COIN": -0.002, "CMG": 0.0, "JD": 0.0005, "AAPL": 0.0002, "UNH": -0.001}
+             "META": 0.0015, "COIN": -0.002, "CMG": 0.0, "JD": 0.0005, "AAPL": 0.0002, "UNH": -0.001,
+             "SPY": 0.0004, "KO": 0.0002, "BAC": 0.0006, "SNOW": -0.0005, "OXY": 0.0001}
     for t, mu in drift.items():
         price, rows = 100.0, []
         for d in range(days + 400, -1, -1):
@@ -89,8 +90,10 @@ def main(days: int = 90, seed: int = 7) -> None:
     tick = TickerResolver({"037833100": "AAPL", "060505104": "BAC", "191216100": "KO",
                            "833445109": "SNOW", "78462F103": "SPY"}, {"Chubb Ltd": "CB"})
     q2, q3 = f"{today.year}-06-30", f"{today.year}-09-30"
-    store.save_13f("buffett", q2, "demo-q2", parse_infotable((fix / "prev_q.xml").read_bytes()), tick)
-    store.save_13f("buffett", q3, "demo-q3", parse_infotable((fix / "curr_q.xml").read_bytes()), tick)
+    store.save_13f("buffett", q2, "demo-q2", parse_infotable((fix / "prev_q.xml").read_bytes()), tick,
+                   date(today.year, 8, 14))
+    store.save_13f("buffett", q3, "demo-q3", parse_infotable((fix / "curr_q.xml").read_bytes()), tick,
+                   min(today, date(today.year, 11, 3)))
     print(f"demo posts: {len(posts)}, trades: {len(trades)}")
 
 

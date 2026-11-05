@@ -334,7 +334,7 @@ def _refresh_13f(store, investors, quarters: int = 4) -> None:
                 if resolver is None:
                     resolver = _sec_resolver(client)     # one download, shared by everyone
                 store.save_13f(inv.key, q, f.accession,
-                               parse_infotable(client.fetch_infotable_xml(f)), resolver)
+                               parse_infotable(client.fetch_infotable_xml(f)), resolver, f.filing_date)
                 new += 1
             results.append(SourceResult("sec13f", inv.key, True, new))
         except Exception as exc:

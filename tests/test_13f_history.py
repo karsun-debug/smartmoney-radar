@@ -95,3 +95,54 @@ def test_consensus_page_and_ticker_owners(tmp_path):
     assert "最多大神持有" in page and "Bill Ackman" in page
     tpage = (tmp_path / "ticker" / "AAPL.html").read_text(encoding="utf-8")
     assert "13F：哪些大神持有" in tpage and "Warren Buffett" in tpage
+
+
+def _csv(start, days, p0, step):
+    from datetime import timedelta
+    rows = ["Date,Open,High,Low,Close,Volume"]
+    rows += [f"{start + timedelta(days=i)},1,1,1,{p0 + step * i:.4f},1" for i in range(days)]
+    return "\n".join(rows).encode()
+
+
+def test_clone_backtest_vs_spy(tmp_path):
+    from datetime import timedelta
+    from spiderhead.clone import backtest
+    from spiderhead.models import Holding
+    from spiderhead.performance import PriceBook
+    today = date(2026, 11, 5)
+    store = Store(":memory:")
+    q1 = [Holding("APPLE", "A1", "COM", 300, 1), Holding("COKE", "K1", "COM", 100, 1),
+          Holding("SPY PUT", "S1", "COM", 999, 1, "SH", "PUT")]
+    q2 = [Holding("APPLE", "A1", "COM", 100, 1)]
+    tick = {"A1": "AAPL", "K1": "KO", "S1": "SPY"}
+    store.save_13f("buffett", "2026-03-31", "x1", q1, lambda h: tick[h.cusip], date(2026, 5, 15))
+    store.save_13f("buffett", "2026-06-30", "x2", q2, lambda h: tick[h.cusip], date(2026, 8, 14))
+    start = date(2026, 5, 1)
+    feeds = {"aapl.us": _csv(start, 200, 100, 0.5),     # rises
+             "ko.us": _csv(start, 200, 100, -0.1),      # falls slightly
+             "spy.us": _csv(start, 200, 100, 0.1)}
+    pb = PriceBook(store, lambda url, h: feeds[url.split("s=")[1].split("&")[0]])
+    res = backtest(store, load_watchlist()["buffett"], pb, today=today)
+    assert [p.quarter for p in res.periods] == ["2026-03-31", "2026-06-30"]
+    p1 = res.periods[0]
+    assert (p1.entry, p1.exit) == (date(2026, 5, 15), date(2026, 8, 14))
+    assert [t for t, _, _ in p1.holdings] == ["AAPL", "KO"]              # option ignored
+    assert abs(sum(w for _, w, _ in p1.holdings) - 1) < 1e-9 and p1.holdings[0][1] == 0.75
+    assert p1.ret > p1.bench > 0 and res.excess > 0 and res.beat_rate == 1.0
+    build_site(store, load_watchlist(), tmp_path, days=7, prices=pb)
+    assert "跟單累積報酬" in (tmp_path / "clone.html").read_text(encoding="utf-8")
+    assert "跟單回測" in (tmp_path / "investor" / "buffett.html").read_text(encoding="utf-8")
+
+
+def test_filed_date_migration_and_default(tmp_path):
+    import sqlite3
+    db = tmp_path / "old.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE holdings_13f (investor TEXT NOT NULL, quarter TEXT NOT NULL, accession TEXT"
+                " NOT NULL, cusip TEXT NOT NULL, put_call TEXT NOT NULL DEFAULT '', ticker TEXT, issuer TEXT,"
+                " title TEXT, shares INTEGER, value INTEGER, PRIMARY KEY (investor, quarter, cusip, put_call))")
+    con.execute("INSERT INTO holdings_13f VALUES ('b','2026-06-30','a','c','', 'X','I','T',1,1)")
+    con.commit()
+    con.close()
+    store = Store(db)
+    assert store.filed_13f("b", "2026-06-30") == date(2026, 8, 14)      # quarter end + 45 days
